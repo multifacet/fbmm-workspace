@@ -5,3 +5,6 @@
 *.swo
 
 doc/book/
+
+bmks/alloc_test
+bmks/fom_wrapper
