@@ -1,17 +1,13 @@
 /// Configure a freshly acquired cloudlab machine and install
 /// all necessary software
 
-use std::path::PathBuf;
-use std::process::Command;
-
 use clap::clap_app;
 
 use libscail::{
     clone_git_repo, dir, downloads,
-    downloads::{Download, download, download_and_extract},
-    get_user_home_dir, GitRepo,
-    rsync_to_remote, with_shell, KernelBaseConfigSource, KernelConfig, KernelPkgType, KernelSrc,
-    Login, ServiceAction
+    downloads::download_and_extract,
+    get_user_home_dir, GitRepo, install_spec_2017,
+    with_shell, Login
 };
 
 use spurs::{cmd, Execute, SshShell};
@@ -161,6 +157,8 @@ where
         libscail::install_rust(&ushell)?;
     }
 
+    set_up_host_devices(&ushell, &cfg)?;
+
     if cfg.clone_wkspc {
         clone_research_workspace(&ushell, &cfg)?;
     }
@@ -171,6 +169,10 @@ where
 
     if cfg.host_bmks {
         build_host_benchmarks(&ushell)?;
+    }
+
+    if let Some(iso_path) = cfg.spec_2017 {
+        install_spec_2017(&ushell, &cfg.login, iso_path, crate::SPEC2017_PATH)?;
     }
 
     Ok(())
@@ -234,7 +236,7 @@ where
         username: user,
     };
 
-    clone_git_repo(ushell, wkspc_repo, Some("research-workspace"), None, cfg.secret, SUBMODULES)?;
+    clone_git_repo(ushell, wkspc_repo, Some("research-workspace"), cfg.wkspc_branch, cfg.secret, SUBMODULES)?;
 
     Ok(())
 }
@@ -243,5 +245,54 @@ fn build_host_benchmarks(
     ushell: &SshShell,
 ) -> Result<(), failure::Error>
 {
+    ushell.run(cmd!("mkdir -p {}", crate::RESULTS_PATH))?;
+
+    let bmks_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
+    ushell.run(cmd!("make").cwd(bmks_dir))?;
+
+    Ok(())
+}
+
+fn set_up_host_devices<A>(ushell: &SshShell, cfg: &SetupConfig<'_, A>) -> Result<(), failure::Error>
+where
+    A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
+{
+    // Remove any existing swap partitions from /etc/fstab because we plan to do all of our own
+    // mounting and unmounting. Moreover, if fstab contains a swap partition that we destroy during
+    // setup, systemd will sit around trying to find it and adding minutes to every reboot.
+    ushell.run(cmd!(
+        r#"sudo sed -i 's/^.*swap.*$/#& # COMMENTED OUT BY setup00000/' /etc/fstab"#
+    ))?;
+
+    if cfg.resize_root {
+        libscail::resize_root_partition(ushell)?;
+    }
+
+    if let Some(swap_devs) = &cfg.swap_devices {
+        if swap_devs.is_empty() {
+            let unpartitioned =
+                spurs_util::get_unpartitioned_devs(ushell, /* dry_run */ false)?;
+            for dev in unpartitioned.iter() {
+                ushell.run(cmd!("sudo mkswap /dev/{}", dev))?;
+            }
+        } else {
+            let mut swap_devices = Vec::new();
+            for dev in swap_devs.iter() {
+                let dev = if cfg.unstable_names {
+                    let dev_id = libscail::get_device_id(ushell, dev)?;
+                    dir!("disk/by-id/", dev_id)
+                } else {
+                    (*dev).to_owned()
+                };
+
+                ushell.run(cmd!("sudo mkswap /dev/{}", dev))?;
+
+                swap_devices.push(dev);
+            }
+
+            libscail::set_remote_research_setting(&ushell, "swap-devices", &swap_devices)?;
+        }
+    }
+
     Ok(())
 }

@@ -1,7 +1,9 @@
 mod setup_wkspc;
 
-const RESULTS_DIR: &str = "results/";
-const RESEARCH_WORKSPACE_DIR: &str = "research-workspace/";
+const RESULTS_PATH: &str = "results/";
+const RESEARCH_WORKSPACE_PATH: &str = "research-workspace/";
+const BMKS_PATH: &str = "bmks/";
+const SPEC2017_PATH: &str = "spec2017/";
 
 fn run() -> Result<(), failure::Error> {
     let matches = clap::App::new("runner")
