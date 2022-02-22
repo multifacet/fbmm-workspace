@@ -193,17 +193,15 @@ where
             "build-essential",
             "libssl-dev",
             "numactl",
-            "perf",
+            "linux-tools-common",
             "openjdk-8-jdk",
             "fuse",
             "memcached",
             "redis-server",
             "python3",
-            "python3-devel",
-            "cmake3",
+            "cmake",
             "curl",
-            "bcc-tools",
-            "libbcc-examples",
+            "bpfcc-tools",
         ]),
     };
 
@@ -231,12 +229,13 @@ where
 {
     const SUBMODULES: &[&str] = &["libscail"];
     let user = &cfg.git_user.unwrap_or("");
+    let branch = cfg.wkspc_branch.unwrap_or("main");
     let wkspc_repo = GitRepo::HttpsPrivate {
         repo: "github.com/BijanT/fom-research-workspace.git",
         username: user,
     };
 
-    clone_git_repo(ushell, wkspc_repo, Some("research-workspace"), cfg.wkspc_branch, cfg.secret, SUBMODULES)?;
+    clone_git_repo(ushell, wkspc_repo, Some("research-workspace"), Some(branch), cfg.secret, SUBMODULES)?;
 
     Ok(())
 }

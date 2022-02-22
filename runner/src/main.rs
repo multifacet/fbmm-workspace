@@ -7,6 +7,11 @@ const SPEC2017_PATH: &str = "spec2017/";
 
 fn run() -> Result<(), failure::Error> {
     let matches = clap::App::new("runner")
+        .arg(
+            clap::Arg::with_name("PRINT_RESULTS_PATH")
+                .long("print_results_path")
+                .help("Obsolete"),
+        )
         .subcommand(crate::setup_wkspc::cli_options())
         .setting(clap::AppSettings::SubcommandRequiredElseHelp)
         .setting(clap::AppSettings::DisableVersion)
