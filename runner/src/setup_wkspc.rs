@@ -172,8 +172,12 @@ where
     }
 
     if let Some(iso_path) = cfg.spec_2017 {
-        install_spec_2017(&ushell, &cfg.login, iso_path, crate::SPEC2017_PATH)?;
+        let spec_path = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, crate::SPEC2017_PATH);
+        let config = "spec-linux-x86.cfg";
+        install_spec_2017(&ushell, &cfg.login, iso_path, &config, &spec_path)?;
     }
+
+    ushell.run(cmd!("echo DONE"))?;
 
     Ok(())
 }
