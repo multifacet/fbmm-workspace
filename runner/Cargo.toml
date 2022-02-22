@@ -1,0 +1,14 @@
+[package]
+name = "runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libscail = { path = "../libscail" }
+spurs = "0.9.0"
+spurs-util = "0.3.0"
+clap = { version = "2.32.0", features = [ "color" ] }
+failure = "0.1.5"
+failure_derive = "0.1.5"
+env_logger = "0.6.0"
+console = "0.9.1"
