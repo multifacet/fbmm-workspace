@@ -204,6 +204,7 @@ where
             "redis-server",
             "python3",
             "cmake",
+            "gfortran",
             "curl",
             "bpfcc-tools",
         ]),
@@ -220,6 +221,12 @@ where
          sudo tee /etc/profile.d/java.sh",
         cfg.login.username
     ))?;
+
+    // Clone FlameGraph
+    let flamegraph_repo = GitRepo::HttpsPublic {
+        repo: "https://github.com/brendangregg/FlameGraph.git"
+    };
+    clone_git_repo(ushell, flamegraph_repo, None, None, None, &[])?;
 
     Ok(())
 }
@@ -248,10 +255,17 @@ fn build_host_benchmarks(
     ushell: &SshShell,
 ) -> Result<(), failure::Error>
 {
+    let user_home = get_user_home_dir(ushell)?;
+
     ushell.run(cmd!("mkdir -p {}", crate::RESULTS_PATH))?;
 
+    // Build microbenchmarks
     let bmks_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     ushell.run(cmd!("make").cwd(bmks_dir))?;
+
+    // Download PARSEC and build canneal
+    download_and_extract(ushell, downloads::PARSEC, &user_home, None)?;
+    ushell.run(cmd!("./parsecmgmt -a build -p canneal").cwd("parsec-3.0/bin/"))?;
 
     Ok(())
 }
