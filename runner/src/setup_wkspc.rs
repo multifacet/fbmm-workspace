@@ -62,6 +62,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "(Optional) If passed, setup and build SPEC 2017 on the remote machine (on the host only). \
           Because SPEC 2017 is not free, you need to pass runner a path to the SPEC 2017 ISO on the \
           driver machine. The ISO will be copied to the remote machine, mounted, and installed there.")
+        (@arg PMEM_SIZE: --pmem_size +takes_value
+         "(Optional) If passed, reserved the specified amount of RAM in GB as PMEM.")
         (@arg JEMALLOC: --jemalloc
          "(Optional) set jemalloc as the system allocator.")
     }
@@ -98,6 +100,9 @@ where
     /// Should we install SPEC 2017? If so, what is the ISO path?
     spec_2017: Option<&'a str>,
 
+    /// How much of the RAM in GB should we reserve as fake "pmem"
+    pmem_size: Option<usize>,
+
     /// Set jemalloc as the default system allocator.
     jemalloc: bool,
 }
@@ -123,6 +128,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let host_bmks = sub_m.is_present("HOST_BMKS");
     let spec_2017 = sub_m.value_of("SPEC_2017");
 
+    let pmem_size = sub_m.value_of("PMEM_SIZE").map(|size| size.parse::<usize>().unwrap());
+
     let jemalloc = sub_m.is_present("JEMALLOC");
 
     let cfg = SetupConfig {
@@ -137,6 +144,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         secret,
         host_bmks,
         spec_2017,
+        pmem_size,
         jemalloc,
     };
 
@@ -161,6 +169,15 @@ where
 
     if cfg.clone_wkspc {
         clone_research_workspace(&ushell, &cfg)?;
+    }
+
+    if let Some(size) = cfg.pmem_size {
+        ushell.run(cmd!(
+            r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G"/' \
+            /etc/default/grub | sudo tee /etc/default/grub"#,
+            size
+        ))?;
+        ushell.run(cmd!("sudo update-grub2"))?;
     }
 
     if cfg.jemalloc {
@@ -278,7 +295,7 @@ where
     // mounting and unmounting. Moreover, if fstab contains a swap partition that we destroy during
     // setup, systemd will sit around trying to find it and adding minutes to every reboot.
     ushell.run(cmd!(
-        r#"sudo sed -i 's/^.*swap.*$/#& # COMMENTED OUT BY setup00000/' /etc/fstab"#
+        r#"sudo sed -i 's/^.*swap.*$/#& # COMMENTED OUT BY setup_wkspc/' /etc/fstab"#
     ))?;
 
     if cfg.resize_root {
