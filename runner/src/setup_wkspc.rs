@@ -213,6 +213,10 @@ where
         spurs_util::ubuntu::apt_install(&[
             "build-essential",
             "libssl-dev",
+            "libelf-dev",
+            "libncurses-dev",
+            "dwarves",
+            "libpci-dev",
             "numactl",
             "linux-tools-common",
             "openjdk-8-jdk",
@@ -241,7 +245,7 @@ where
 
     // Clone FlameGraph
     let flamegraph_repo = GitRepo::HttpsPublic {
-        repo: "https://github.com/brendangregg/FlameGraph.git"
+        repo: "github.com/brendangregg/FlameGraph.git"
     };
     clone_git_repo(ushell, flamegraph_repo, None, None, None, &[])?;
 
