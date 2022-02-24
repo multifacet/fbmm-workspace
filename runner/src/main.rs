@@ -1,9 +1,11 @@
 mod setup_wkspc;
+mod setup_kernel;
 
 const RESULTS_PATH: &str = "results/";
 const RESEARCH_WORKSPACE_PATH: &str = "research-workspace/";
 const BMKS_PATH: &str = "bmks/";
 const SPEC2017_PATH: &str = "spec2017/";
+const KERNEL_PATH: &str = "kernel/";
 
 fn run() -> Result<(), failure::Error> {
     let matches = clap::App::new("runner")
@@ -13,12 +15,14 @@ fn run() -> Result<(), failure::Error> {
                 .help("Obsolete"),
         )
         .subcommand(crate::setup_wkspc::cli_options())
+        .subcommand(crate::setup_kernel::cli_options())
         .setting(clap::AppSettings::SubcommandRequiredElseHelp)
         .setting(clap::AppSettings::DisableVersion)
         .get_matches();
 
     match matches.subcommand() {
         ("setup_wkspc", Some(sub_m)) => crate::setup_wkspc::run(sub_m),
+        ("setup_kernel", Some(sub_m)) => crate::setup_kernel::run(sub_m),
         _ => {
             unreachable!();
         }
