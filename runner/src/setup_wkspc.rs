@@ -1,13 +1,10 @@
 /// Configure a freshly acquired cloudlab machine and install
 /// all necessary software
-
 use clap::clap_app;
 
 use libscail::{
-    clone_git_repo, dir, downloads,
-    downloads::download_and_extract,
-    get_user_home_dir, GitRepo, install_spec_2017,
-    with_shell, Login
+    clone_git_repo, dir, downloads, downloads::download_and_extract, get_user_home_dir,
+    install_spec_2017, with_shell, GitRepo, Login,
 };
 
 use spurs::{cmd, Execute, SshShell};
@@ -29,7 +26,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "(Optional) resize the root partition to take up the whole device, \
           destroying any other partitions on the device. This is useful on cloudlab, \
           where the root partition is 16GB by default.")
-        
+
         (@arg SWAP_DEVS: +takes_value --swap ...
          "(Optional) specify which devices to use as swap devices. The devices must \
          all be _unmounted_. By default all unpartitioned, unmounted devices are used \
@@ -128,7 +125,9 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let host_bmks = sub_m.is_present("HOST_BMKS");
     let spec_2017 = sub_m.value_of("SPEC_2017");
 
-    let pmem_size = sub_m.value_of("PMEM_SIZE").map(|size| size.parse::<usize>().unwrap());
+    let pmem_size = sub_m
+        .value_of("PMEM_SIZE")
+        .map(|size| size.parse::<usize>().unwrap());
 
     let jemalloc = sub_m.is_present("JEMALLOC");
 
@@ -189,7 +188,11 @@ where
     }
 
     if let Some(iso_path) = cfg.spec_2017 {
-        let spec_path = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, crate::SPEC2017_PATH);
+        let spec_path = dir!(
+            crate::RESEARCH_WORKSPACE_PATH,
+            crate::BMKS_PATH,
+            crate::SPEC2017_PATH
+        );
         let config = "spec-linux-x86.cfg";
         install_spec_2017(&ushell, &cfg.login, iso_path, &config, &spec_path)?;
     }
@@ -245,7 +248,7 @@ where
 
     // Clone FlameGraph
     let flamegraph_repo = GitRepo::HttpsPublic {
-        repo: "github.com/brendangregg/FlameGraph.git"
+        repo: "github.com/brendangregg/FlameGraph.git",
     };
     clone_git_repo(ushell, flamegraph_repo, None, None, None, &[])?;
 
@@ -267,15 +270,19 @@ where
         username: user,
     };
 
-    clone_git_repo(ushell, wkspc_repo, Some("research-workspace"), Some(branch), cfg.secret, SUBMODULES)?;
+    clone_git_repo(
+        ushell,
+        wkspc_repo,
+        Some("research-workspace"),
+        Some(branch),
+        cfg.secret,
+        SUBMODULES,
+    )?;
 
     Ok(())
 }
 
-fn build_host_benchmarks(
-    ushell: &SshShell,
-) -> Result<(), failure::Error>
-{
+fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     let user_home = get_user_home_dir(ushell)?;
 
     ushell.run(cmd!("mkdir -p {}", crate::RESULTS_PATH))?;

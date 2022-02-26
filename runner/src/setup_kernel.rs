@@ -1,8 +1,8 @@
 use clap::clap_app;
 
 use libscail::{
-    dir, get_user_home_dir, get_git_hash, GitRepo,
-    KernelBaseConfigSource, KernelConfig, KernelPkgType, KernelSrc, Login,
+    dir, get_git_hash, get_user_home_dir, GitRepo, KernelBaseConfigSource, KernelConfig,
+    KernelPkgType, KernelSrc, Login,
 };
 
 use spurs::{cmd, Execute, SshShell};
@@ -51,9 +51,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             repo: repo,
         }
     } else {
-        GitRepo::HttpsPublic {
-            repo: repo,
-        }
+        GitRepo::HttpsPublic { repo: repo }
     };
 
     let kernel_config: Vec<_> = sub_m
@@ -76,11 +74,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         Some(&kernel_path),
         Some(&branch),
         secret,
-        &[]
+        &[],
     )?;
 
     // Get the base config
-    let config = ushell.run(cmd!("ls -1 /boot/config-* | head -n1").use_bash())?.stdout;
+    let config = ushell
+        .run(cmd!("ls -1 /boot/config-* | head -n1").use_bash())?
+        .stdout;
     let config = config.trim();
     let git_hash = get_git_hash(&ushell, &kernel_path)?;
     let kernel_localversion = libscail::gen_local_version(branch, &git_hash);
@@ -103,28 +103,24 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
     // Find the deb package
     let kernel_deb = ushell
-        .run(
-            cmd!(
-                "ls -Art {} | \
+        .run(cmd!(
+            "ls -Art {} | \
                 grep .*\\.deb |\
                 grep -v headers | \
                 grep -v libc | \
                 grep -v dbg | \
                 tail -n 1",
-                kernel_path
-            )
-        )?
+            kernel_path
+        ))?
         .stdout;
     let kernel_headers_deb = ushell
-        .run(
-            cmd!(
-                "ls -Art {} | \
+        .run(cmd!(
+            "ls -Art {} | \
                 grep .*\\.deb | \
                 grep headers | \
                 tail -n 1",
-                kernel_path
-            )
-        )?
+            kernel_path
+        ))?
         .stdout;
     let kernel_deb = kernel_deb.trim();
     let kernel_headers_deb = kernel_headers_deb.trim();

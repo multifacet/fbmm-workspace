@@ -1,5 +1,5 @@
-mod setup_wkspc;
 mod setup_kernel;
+mod setup_wkspc;
 
 const RESULTS_PATH: &str = "results/";
 const RESEARCH_WORKSPACE_PATH: &str = "research-workspace/";
@@ -60,6 +60,5 @@ recommended that you use `debug` builds of `runner`, rather than `release`, as t
         );
 
         std::process::exit(101);
-
     }
 }
