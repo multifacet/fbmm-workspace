@@ -5,6 +5,7 @@ mod fom_exp;
 const RESULTS_PATH: &str = "results/";
 const RESEARCH_WORKSPACE_PATH: &str = "research-workspace/";
 const BMKS_PATH: &str = "bmks/";
+const SCRIPTS_PATH: &str = "scripts/";
 const SPEC2017_PATH: &str = "spec2017/";
 const PARSEC_PATH: &str = "parsec-3.0/";
 const KERNEL_PATH: &str = "kernel/";

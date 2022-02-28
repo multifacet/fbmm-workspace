@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use spurs::{cmd, Execute, SshShell};
 use spurs_util::escape_for_bash;
+use std::time::Instant;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum Workload {
@@ -46,6 +47,7 @@ struct Config {
     mm_fault_tracker: bool,
     flame_graph: bool,
     fom: bool,
+    pte_fault_size: usize,
 
     username: String,
     host: String,
@@ -105,6 +107,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Generate a flame graph of the workload.")
         (@arg FOM: --fom
          "Run the workload with file only memory.")
+        (@arg PTE_FAULT_SIZE: --pte_fault_size {validator::is::<usize>}
+         "The number of pages to allocate on a DAX pte fault.")
     }
 }
 
@@ -154,6 +158,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let fom = sub_m.is_present("FOM");
+    let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
     let perf_counters: Vec<String> = sub_m
         .values_of("PERF_COUNTER")
         .map(|counters| counters.map(Into::into).collect()).unwrap();
@@ -172,6 +177,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         mm_fault_tracker,
         flame_graph,
         fom,
+        pte_fault_size,
 
         username: login.username.into(),
         host: login.hostname.into(),
@@ -194,13 +200,12 @@ where
     let user_home = get_user_home_dir(&ushell)?;
 
     let cores = libscail::get_num_cores(&ushell)?;
-    let tctx = TasksetCtx::new(cores);
+    let mut tctx = TasksetCtx::new(cores);
 
     // Setup the output file name
     let results_dir = dir!(&user_home, crate::RESULTS_PATH);
 
-    let (output_file, params_file, time_file, sim_file) = cfg.gen_standard_names();
-    let output_file = dir!(&results_dir, output_file);
+    let (_output_file, params_file, time_file, _sim_file) = cfg.gen_standard_names();
     let perf_stat_file = dir!(&results_dir, cfg.gen_file_name("perf_stat"));
     let perf_record_file = dir!(&results_dir, cfg.gen_file_name("perf_record"));
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
@@ -208,6 +213,7 @@ where
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
+    let scripts_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SCRIPTS_PATH);
     let spec_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
 
@@ -242,7 +248,7 @@ where
         transparent_hugepage_khugepaged_defrag,
         1000,
         1000
-    );
+    )?;
 
     if cfg.disable_aslr {
         libscail::disable_aslr(&ushell)?;
@@ -259,8 +265,10 @@ where
     }
 
     if cfg.fom {
-        cmd_prefix.push_str(&format!("{}/fom_wrapper ", bmks_dir));        
+        cmd_prefix.push_str(&format!("{}/fom_wrapper ", bmks_dir));
     }
+
+    ushell.run(cmd!("echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size", cfg.pte_fault_size))?;
 
     let perf_file = if cfg.perf_record {
         Some(perf_record_file.as_str())
@@ -268,8 +276,37 @@ where
         None
     };
 
+    // Start the mm_fault_tracker BPF script if requested
+    let mm_fault_tracker_handle = if cfg.mm_fault_tracker {
+        let spawn_handle = ushell.spawn(cmd!(
+            "sudo {}/mm_fault_tracker.py -c {} > {}",
+            &scripts_dir,
+            &proc_name,
+            &mm_fault_file
+        ))?;
+        // Wait some time for the BPF validator to begin
+        println!("Waiting for BPF validator to complete...");
+        ushell.run(cmd!("sleep 10"))?;
+
+        Some(spawn_handle)
+    } else {
+        None
+    };
+
     match cfg.workload {
-        Workload::AllocTest { size } => (),
+        Workload::AllocTest { size } => {
+            time!(timers, "Workload", {
+                run_alloc_test(
+                    &ushell,
+                    &bmks_dir,
+                    size,
+                    Some(&cmd_prefix),
+                    perf_file,
+                    &runtime_file,
+                    tctx.next(),
+                )?;
+            });
+        }
 
         Workload::Canneal { workload } => {
             time!(timers, "Workload", {
@@ -298,7 +335,7 @@ where
 
             time!(timers, "Workload", {
                 run_spec17(
-                    ushell,
+                    &ushell,
                     &spec_dir,
                     wkload,
                     None,
@@ -311,6 +348,31 @@ where
         }
     }
 
+    // Generate the flamegraph if needed
+    if cfg.flame_graph {
+        ushell.run(cmd!(
+            "sudo perf script | ./FlameGraph/stackcollapse-perf.pl > /tmp/flamegraph"
+        ))?;
+        ushell.run(cmd!("./FlameGraph/flamegraph.pl /tmp/flamegraph > {}", flame_graph_file))?;
+    }
+
+    // Clean up the mm_fault_tracker if it was started
+    if let Some(handle) = mm_fault_tracker_handle {
+        ushell.run(cmd!("sudo killall mm_fault_tracker.py"))?;
+        handle.join().1?;
+    }
+
+    ushell.run(cmd!("date"))?;
+
+    ushell.run(cmd!("free -h"))?;
+
+    ushell.run(cmd!(
+        "echo {} > {}",
+        escape_for_bash(&libscail::timings_str(timers.as_slice())),
+        dir!(&results_dir, time_file)
+    ))?;
+
+    println!("RESULTS: {}", &results_dir);
     Ok(())
 }
 
@@ -350,4 +412,40 @@ where
     set_kernel_printk_level(&ushell, 5)?;
 
     Ok(ushell)
+}
+
+fn run_alloc_test(
+    ushell: &SshShell,
+    bmks_dir: &str,
+    size: usize,
+    cmd_prefix: Option<&str>,
+    perf_file: Option<&str>,
+    runtime_file: &str,
+    pin_core: usize
+) -> Result<(), failure::Error> {
+
+    let start = Instant::now();
+    if let Some(perf_file) = perf_file {
+        ushell.run(cmd!(
+            "sudo perf record -a -C {} -g -F 99 \
+            sudo taskset -c {} {} ./alloc_test {} && \
+            sudo perf report --stdio > {}",
+            pin_core,
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            size,
+            perf_file
+        ).cwd(bmks_dir))?;
+    } else {
+        ushell.run(cmd!(
+            "sudo taskset -c {} {} ./alloc_test {}",
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            size
+        ).cwd(bmks_dir))?;
+    }
+    let duration = Instant::now() - start;
+
+    ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
+    Ok(())
 }
