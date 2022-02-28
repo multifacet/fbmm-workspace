@@ -536,6 +536,9 @@ dependencies = [
  "failure",
  "failure_derive",
  "libscail",
+ "runner-proc-macro",
+ "serde",
+ "serde_json",
  "spurs",
  "spurs-util",
 ]

@@ -1,10 +1,12 @@
 mod setup_kernel;
 mod setup_wkspc;
+mod fom_exp;
 
 const RESULTS_PATH: &str = "results/";
 const RESEARCH_WORKSPACE_PATH: &str = "research-workspace/";
 const BMKS_PATH: &str = "bmks/";
 const SPEC2017_PATH: &str = "spec2017/";
+const PARSEC_PATH: &str = "parsec-3.0/";
 const KERNEL_PATH: &str = "kernel/";
 
 fn run() -> Result<(), failure::Error> {
@@ -16,6 +18,7 @@ fn run() -> Result<(), failure::Error> {
         )
         .subcommand(crate::setup_wkspc::cli_options())
         .subcommand(crate::setup_kernel::cli_options())
+        .subcommand(crate::fom_exp::cli_options())
         .setting(clap::AppSettings::SubcommandRequiredElseHelp)
         .setting(clap::AppSettings::DisableVersion)
         .get_matches();
@@ -23,6 +26,7 @@ fn run() -> Result<(), failure::Error> {
     match matches.subcommand() {
         ("setup_wkspc", Some(sub_m)) => crate::setup_wkspc::run(sub_m),
         ("setup_kernel", Some(sub_m)) => crate::setup_kernel::run(sub_m),
+        ("fom_exp", Some(sub_m)) => crate::fom_exp::run(sub_m),
         _ => {
             unreachable!();
         }
