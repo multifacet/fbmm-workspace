@@ -107,7 +107,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Generate a flame graph of the workload.")
         (@arg FOM: --fom
          "Run the workload with file only memory.")
-        (@arg PTE_FAULT_SIZE: --pte_fault_size {validator::is::<usize>}
+        (@arg PTE_FAULT_SIZE: --pte_fault_size +takes_value {validator::is::<usize>}
          "The number of pages to allocate on a DAX pte fault.")
     }
 }
@@ -161,7 +161,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
     let perf_counters: Vec<String> = sub_m
         .values_of("PERF_COUNTER")
-        .map(|counters| counters.map(Into::into).collect()).unwrap();
+        .map_or(Vec::new(), |counters| counters.map(Into::into).collect());
 
     let ushell = SshShell::with_any_key(login.username, login.host)?;
     let remote_research_settings = libscail::get_remote_research_settings(&ushell)?;
@@ -214,7 +214,7 @@ where
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let scripts_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SCRIPTS_PATH);
-    let spec_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SPEC2017_PATH);
+    let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
 
     ushell.run(cmd!(
@@ -266,6 +266,15 @@ where
 
     if cfg.fom {
         cmd_prefix.push_str(&format!("{}/fom_wrapper ", bmks_dir));
+
+        // Set up the remote for FOM
+        ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
+        ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
+        ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
+        ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
+        ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
+        ushell.run(cmd!("echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fom/file_dir", &user_home))?;
+        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/state"))?;
     }
 
     ushell.run(cmd!("echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size", cfg.pte_fault_size))?;
@@ -372,7 +381,8 @@ where
         dir!(&results_dir, time_file)
     ))?;
 
-    println!("RESULTS: {}", &results_dir);
+    let glob = cfg.gen_file_name("");
+    println!("RESULTS: {}", dir!(&results_dir, glob));
     Ok(())
 }
 
@@ -380,13 +390,15 @@ fn connect_and_setup_host<A>(login: &Login<A>) -> Result<SshShell, failure::Erro
 where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
-    let mut ushell = SshShell::with_any_key(login.username, &login.host)?; 
-    spurs_util::reboot(&mut ushell, /* dry_run */ false)?;
+    let ushell = SshShell::with_any_key(login.username, &login.host)?;
+//    spurs_util::reboot(&mut ushell, /* dry_run */ false)?;
+    let _ = ushell.run(cmd!("sudo reboot"));
 
     // Keep trying to connect until we succeed
     let ushell = {
         let mut shell;
         loop {
+            println!("Attempting to reconnect...");
             shell = match SshShell::with_any_key(login.username, &login.host) {
                 Ok(shell) => shell,
                 Err(_) => {
@@ -408,7 +420,7 @@ where
 
     dump_sys_info(&ushell)?;
 
-    ushell.run(cmd!("sudo cpupower frequency-set -g performance",))?;
+//    ushell.run(cmd!("sudo cpupower frequency-set -g performance",))?;
     set_kernel_printk_level(&ushell, 5)?;
 
     Ok(ushell)
