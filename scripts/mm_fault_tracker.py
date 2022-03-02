@@ -36,7 +36,7 @@ static bool strequals(char *s1, char *s2, u32 len) {
         }
     }
 
-//    for (u32 i = 0; i < 2; i++){}
+    for (u32 i = 0; i < 2; i++){}
 
     return true;
 }
