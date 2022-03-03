@@ -138,6 +138,7 @@ b.attach_kretprobe(event="__handle_mm_fault", fn_name="pf_end")
 header_string = "%-10.10s %-6s %-6s %-14s %-14s %-8s"
 format_string = "%-10.10s %-6d %-6d %-14d %-14d %-8d"
 print(header_string % ("COMM", "PID", "TID", "FAULT_TIME", "FAULT_COUNT", "AVG"))
+sys.stdout.flush()
 
 def handle_fault_event(cpu, data, size):
     event = b["fault_events"].event(data)
