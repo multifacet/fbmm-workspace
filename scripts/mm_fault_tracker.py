@@ -157,4 +157,5 @@ while not os.path.isfile("/tmp/stop_mm_fault_tracker"):
         print()
         break
 print("Exiting mm_fault_tracker.py")
-
+sys.stdout.flush()
+exit()

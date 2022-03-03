@@ -225,7 +225,7 @@ where
 
     let mut cmd_prefix = String::new();
     let proc_name = match &cfg.workload {
-        Workload::AllocTest { size: _ } => "alloctest",
+        Workload::AllocTest { size: _ } => "alloc_test",
         Workload::Canneal { workload: _ }=> "canneal",
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
