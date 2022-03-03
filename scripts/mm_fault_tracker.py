@@ -2,6 +2,7 @@
 from bcc import BPF
 import argparse
 import sys
+import os
 
 parser = argparse.ArgumentParser(description="Measure how long page faults are on average")
 parser.add_argument("-c", "--comm", help="The name of the process to track")
@@ -148,7 +149,7 @@ def handle_fault_event(cpu, data, size):
 b["fault_events"].open_perf_buffer(handle_fault_event)
 #b.trace_print()
 
-while 1:
+while not os.path.isfile("/tmp/stop_mm_fault_tracker"):
     try:
         b.perf_buffer_poll()
     except KeyboardInterrupt:
