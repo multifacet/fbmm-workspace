@@ -288,7 +288,7 @@ where
     // Start the mm_fault_tracker BPF script if requested
     let mm_fault_tracker_handle = if cfg.mm_fault_tracker {
         let spawn_handle = ushell.spawn(cmd!(
-            "sudo {}/mm_fault_tracker.py -c {} > {}",
+            "sudo {}/mm_fault_tracker.py -c {} | tee {}",
             &scripts_dir,
             &proc_name,
             &mm_fault_file
@@ -367,8 +367,9 @@ where
 
     // Clean up the mm_fault_tracker if it was started
     if let Some(handle) = mm_fault_tracker_handle {
-        ushell.run(cmd!("sudo killall mm_fault_tracker.py"))?;
+        ushell.run(cmd!("touch /tmp/stop_mm_fault_tracker"))?;
         handle.join().1?;
+        ushell.run(cmd!("rm /tmp/stop_mm_fault_tracker"))?;
     }
 
     ushell.run(cmd!("date"))?;

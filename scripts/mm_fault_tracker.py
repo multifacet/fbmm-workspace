@@ -154,4 +154,6 @@ while not os.path.isfile("/tmp/stop_mm_fault_tracker"):
         b.perf_buffer_poll()
     except KeyboardInterrupt:
         print()
-        exit()
+        break
+print("Exiting mm_fault_tracker.py")
+
