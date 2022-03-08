@@ -367,9 +367,8 @@ where
 
     // Clean up the mm_fault_tracker if it was started
     if let Some(handle) = mm_fault_tracker_handle {
-        ushell.run(cmd!("touch /tmp/stop_mm_fault_tracker"))?;
+        ushell.run(cmd!("sudo killall -SIGINT mm_fault_tracker.py"))?;
         handle.join().1?;
-        ushell.run(cmd!("rm /tmp/stop_mm_fault_tracker"))?;
     }
 
     ushell.run(cmd!("date"))?;
