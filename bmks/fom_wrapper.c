@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
 int main(int argc, char *argv[])
 {
@@ -31,7 +33,7 @@ int main(int argc, char *argv[])
 	execv(program_name, &argv[1]);
 
 	// We only get here if execv fails
-	fprintf(stderr, "Failed to execute %s\n", program_name);
+	fprintf(stderr, "Failed to execute %s: %s\n", program_name, strerror(errno));
 
-	return 0;
+	return -1;
 }
