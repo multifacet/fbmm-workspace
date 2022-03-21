@@ -40,7 +40,6 @@ struct Config {
     workload: Workload,
 
     perf_stat: bool,
-    perf_record: bool,
     perf_counters: Vec<String>,
     disable_thp: bool,
     disable_aslr: bool,
@@ -92,8 +91,6 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
-        (@arg PERF_RECORD: --perf_record
-         "Measure the workload using perf record.")
         (@arg PERF_COUNTER: --perf_counter +takes_value ... number_of_values(1)
          requires[PERF_STAT]
          "Which counters to record with perf stat.")
@@ -103,7 +100,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Disable ASLR.")
         (@arg MM_FAULT_TRACKER: --mm_fault_tracker
          "Record page fault statistics with mm_fault_tracker.")
-        (@arg FLAME_GRAPH: --flame_graph requires[PERF_RECORD]
+        (@arg FLAME_GRAPH: --flame_graph
          "Generate a flame graph of the workload.")
         (@arg FOM: --fom
          "Run the workload with file only memory.")
@@ -152,7 +149,6 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     };
 
     let perf_stat = sub_m.is_present("PERF_STAT");
-    let perf_record = sub_m.is_present("PERF_RECORD");
     let disable_thp = sub_m.is_present("DISABLE_THP");
     let disable_aslr = sub_m.is_present("DISABLE_ASLR");
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
@@ -170,7 +166,6 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         exp: "fom_exp".into(),
         workload,
         perf_stat,
-        perf_record,
         perf_counters,
         disable_thp,
         disable_aslr,
@@ -207,7 +202,7 @@ where
 
     let (_output_file, params_file, time_file, _sim_file) = cfg.gen_standard_names();
     let perf_stat_file = dir!(&results_dir, cfg.gen_file_name("perf_stat"));
-    let perf_record_file = dir!(&results_dir, cfg.gen_file_name("perf_record"));
+    let perf_record_file = "/tmp/perf.data";
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
@@ -256,11 +251,32 @@ where
         libscail::enable_aslr(&ushell)?;
     }
 
+    // Figure out which cores we will use for the workload
+    let pin_cores = match &cfg.workload {
+        Workload::Spec2017Mcf
+        | Workload::Spec2017Xz
+        | Workload::Spec2017Xalancbmk => {
+            vec![tctx.next(), tctx.next(), tctx.next(), tctx.next()]
+        }
+        _ => vec![tctx.next()]
+    };
+
     if cfg.perf_stat {
         cmd_prefix.push_str(
             &gen_perf_command_prefix(
                 perf_stat_file, &cfg.perf_counters, ""
             )
+        );
+    }
+
+    if cfg.flame_graph {
+        let pin_cores_str = pin_cores
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        cmd_prefix.push_str(
+            &format!("sudo perf record -a -C {} -g -F 99 -o {} ", pin_cores_str, &perf_record_file)
         );
     }
 
@@ -278,12 +294,6 @@ where
     }
 
     ushell.run(cmd!("echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size", cfg.pte_fault_size))?;
-
-    let perf_file = if cfg.perf_record {
-        Some(perf_record_file.as_str())
-    } else {
-        None
-    };
 
     // Start the mm_fault_tracker BPF script if requested
     let mm_fault_tracker_handle = if cfg.mm_fault_tracker {
@@ -310,9 +320,8 @@ where
                     &bmks_dir,
                     size,
                     Some(&cmd_prefix),
-                    perf_file,
                     &runtime_file,
-                    tctx.next(),
+                    pin_cores[0],
                 )?;
             });
         }
@@ -324,10 +333,9 @@ where
                     &parsec_dir,
                     workload,
                     Some(&cmd_prefix),
-                    perf_file,
                     None,
                     &runtime_file,
-                    tctx.next(),
+                    pin_cores[0],
                 )?;
             });
         }
@@ -349,9 +357,8 @@ where
                     wkload,
                     None,
                     Some(&cmd_prefix),
-                    perf_file,
                     &runtime_file,
-                    [tctx.next(), tctx.next(), tctx.next(), tctx.next()],
+                    pin_cores,
                 )?;
             });
         }
@@ -360,7 +367,8 @@ where
     // Generate the flamegraph if needed
     if cfg.flame_graph {
         ushell.run(cmd!(
-            "sudo perf script | ./FlameGraph/stackcollapse-perf.pl > /tmp/flamegraph"
+            "sudo perf script -i {} | ./FlameGraph/stackcollapse-perf.pl > /tmp/flamegraph",
+            &perf_record_file,
         ))?;
         ushell.run(cmd!("./FlameGraph/flamegraph.pl /tmp/flamegraph > {}", flame_graph_file))?;
     }
@@ -431,31 +439,17 @@ fn run_alloc_test(
     bmks_dir: &str,
     size: usize,
     cmd_prefix: Option<&str>,
-    perf_file: Option<&str>,
     runtime_file: &str,
     pin_core: usize
 ) -> Result<(), failure::Error> {
 
     let start = Instant::now();
-    if let Some(perf_file) = perf_file {
-        ushell.run(cmd!(
-            "sudo perf record -a -C {} -g -F 99 \
-            sudo taskset -c {} {} ./alloc_test {} && \
-            sudo perf report --stdio > {}",
-            pin_core,
-            pin_core,
-            cmd_prefix.unwrap_or(""),
-            size,
-            perf_file
-        ).cwd(bmks_dir))?;
-    } else {
-        ushell.run(cmd!(
-            "sudo taskset -c {} {} ./alloc_test {}",
-            pin_core,
-            cmd_prefix.unwrap_or(""),
-            size
-        ).cwd(bmks_dir))?;
-    }
+    ushell.run(cmd!(
+        "sudo taskset -c {} {} ./alloc_test {}",
+        pin_core,
+        cmd_prefix.unwrap_or(""),
+        size
+    ).cwd(bmks_dir))?;
     let duration = Instant::now() - start;
 
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
