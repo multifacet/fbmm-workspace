@@ -58,7 +58,7 @@ int pf_start(struct pt_regs *ctx) {
         return 0;
 
     // Create a fault info entry for the process if it does not exist
-    info = fault.stats.lookup(&pid_tgid);
+    info = fault_stats.lookup(&pid_tgid);
     if (info == 0) {
         struct fault_info_t new;
         new.time_in_fault = 0;
