@@ -217,6 +217,7 @@ where
             "build-essential",
             "libssl-dev",
             "libelf-dev",
+            "libdw-dev",
             "libncurses-dev",
             "dwarves",
             "libpci-dev",

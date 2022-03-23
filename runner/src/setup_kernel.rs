@@ -30,6 +30,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          + to enable and - to disable. For example, +CONFIG_ZSWAP or \
          -CONFIG_PAGE_TABLE_ISOLATION"
         )
+        (@arg INSTALL_PERF: --install_perf
+         "(Optional) Install the perf corresponding to this kernel")
     }
 }
 
@@ -44,6 +46,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let branch = sub_m.value_of("BRANCH").unwrap_or("main");
     let git_user = sub_m.value_of("GIT_USER").unwrap();
     let secret = sub_m.value_of("SECRET");
+    let install_perf = sub_m.is_present("INSTALL_PERF");
 
     let git_repo = if let Some(_secret) = &secret {
         GitRepo::HttpsPrivate {
@@ -67,6 +70,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
     let user_home = get_user_home_dir(&ushell)?;
     let kernel_path = dir!(&user_home, crate::KERNEL_PATH);
+    let perf_path = dir!(&kernel_path, "tools/perf/");
 
     libscail::clone_git_repo(
         &ushell,
@@ -127,6 +131,15 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
     ushell.run(cmd!("sudo dpkg -i {} {}", kernel_deb, kernel_headers_deb).cwd(kernel_path))?;
     ushell.run(cmd!("sudo grub-set-default 0"))?;
+
+    if install_perf {
+        // Build perf
+        ushell.run(cmd!("make").cwd(&perf_path))?;
+
+        // Put the new perf in place
+        ushell.run(cmd!("sudo rm -f /usr/bin/perf"))?;
+        ushell.run(cmd!("sudo ln -s {}/perf /usr/bin/perf", &perf_path))?;
+    }
 
     Ok(())
 }
