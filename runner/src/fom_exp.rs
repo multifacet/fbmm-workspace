@@ -46,6 +46,7 @@ struct Config {
     mm_fault_tracker: bool,
     flame_graph: bool,
     fom: bool,
+    pmem_size: usize,
     pte_fault_size: usize,
 
     username: String,
@@ -103,7 +104,10 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg FLAME_GRAPH: --flame_graph
          "Generate a flame graph of the workload.")
         (@arg FOM: --fom
+         requires[PMEM_SIZE]
          "Run the workload with file only memory.")
+        (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
+         "(Optional) If passed, reserved the specified amount of RAM in GB as PMEM.")
         (@arg PTE_FAULT_SIZE: --pte_fault_size +takes_value {validator::is::<usize>}
          "The number of pages to allocate on a DAX pte fault.")
     }
@@ -154,6 +158,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let fom = sub_m.is_present("FOM");
+    let pmem_size = sub_m.value_of("PMEM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
     let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
     let perf_counters: Vec<String> = sub_m
         .values_of("PERF_COUNTER")
@@ -172,6 +177,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         mm_fault_tracker,
         flame_graph,
         fom,
+        pmem_size,
         pte_fault_size,
 
         username: login.username.into(),
@@ -191,7 +197,7 @@ where
 {
     // Collect timers on VM
     let mut timers = vec![];
-    let ushell = connect_and_setup_host(login)?;
+    let ushell = SshShell::with_any_key(login.username, &login.host)?;
     let user_home = get_user_home_dir(&ushell)?;
 
     let cores = libscail::get_num_cores(&ushell)?;
@@ -211,6 +217,25 @@ where
     let scripts_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SCRIPTS_PATH);
     let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
+
+    // Setup the pmem settings in the grub config before rebooting
+    // First, clear the memmap option from the boot options
+    ushell.run(cmd!(
+        r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)memmap=[0-9]*[KMG]![0-9]*[KMG]\(.*\)"/GRUB_CMDLINE_LINUX="\1 \2"/' \
+        /etc/default/grub | sudo tee /etc/default/grub"#
+    ))?;
+    // Then, if we are doing a pmem experiment, add it in
+    if cfg.fom {
+        ushell.run(cmd!(
+            r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G"/' \
+            /etc/default/grub | sudo tee /etc/default/grub"#,
+            cfg.pmem_size
+        ))?;
+    }
+    // Finally, update the grub config
+    ushell.run(cmd!("sudo update-grub2"))?;
+
+    let ushell = connect_and_setup_host(login)?;
 
     ushell.run(cmd!(
         "echo {} > {}",
