@@ -16,6 +16,8 @@ bpf_text = """
 
 struct fault_info_t {
     u64 time_in_fault;
+    u64 time_allocing;
+    u64 time_zeroing;
     u64 number_faults;
     u32 pid;
     u32 tgid;
@@ -23,6 +25,8 @@ struct fault_info_t {
 };
 
 BPF_HASH(fault_start, u64, u64);
+BPF_HASH(alloc_start, u64, u64);
+BPF_HASH(zero_start, u64, u64);
 BPF_HASH(fault_stats, u64, struct fault_info_t);
 BPF_PERF_OUTPUT(fault_events);
 
@@ -44,13 +48,31 @@ static bool strequals(char *s1, char *s2, u32 len) {
 
 int pf_start(struct pt_regs *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tgid = pid_tgid & 0xFFFFFFFF;
     u64 start = bpf_ktime_get_ns();
     char comm[TASK_COMM_LEN];
     char target[TASK_COMM_LEN] = "TARGET_COMM";
+    struct fault_info_t *info;
 
     bpf_get_current_comm(&comm, sizeof(comm));
     if (FILTER_PROC)
         return 0;
+
+    // Create a fault info entry for the process if it does not exist
+    info = fault_stats.lookup(&pid_tgid);
+    if (info == 0) {
+        struct fault_info_t new;
+        new.time_in_fault = 0;
+        new.time_allocing = 0;
+        new.time_zeroing = 0;
+        new.number_faults = 0;
+        new.pid = pid;
+        new.tgid = tgid;
+        bpf_get_current_comm(&new.comm, sizeof(new.comm));
+
+        fault_stats.update(&pid_tgid, &new);
+    }
 
     fault_start.update(&pid_tgid, &start);
 
@@ -59,8 +81,6 @@ int pf_start(struct pt_regs *ctx) {
 
 int pf_end(struct pt_regs *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid = pid_tgid >> 32;
-    u32 tgid = pid_tgid & 0xFFFFFFFF;
     u64 end = bpf_ktime_get_ns();
     char comm[TASK_COMM_LEN];
     char target[TASK_COMM_LEN] = "TARGET_COMM";
@@ -78,15 +98,6 @@ int pf_end(struct pt_regs *ctx) {
 
     info = fault_stats.lookup(&pid_tgid);
     if (info == 0) {
-        struct fault_info_t new;
-        new.time_in_fault = end - *start;
-        new.number_faults = 1;
-        new.pid = pid;
-        new.tgid = tgid;
-        bpf_get_current_comm(&new.comm, sizeof(new.comm));
-
-        fault_stats.update(&pid_tgid, &new);
-
         return 0;
     }
 
@@ -94,6 +105,94 @@ int pf_end(struct pt_regs *ctx) {
     info->number_faults += 1;
 
     fault_start.delete(&pid_tgid);
+    fault_stats.update(&pid_tgid, info);
+
+    return 0;
+}
+
+int alloc_page_start(struct pt_regs *ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u64 start = bpf_ktime_get_ns();
+    char comm[TASK_COMM_LEN];
+    char target[TASK_COMM_LEN] = "TARGET_COMM";
+
+    bpf_get_current_comm(&comm, sizeof(comm));
+    if (FILTER_PROC)
+        return 0;
+
+    alloc_start.update(&pid_tgid, &start);
+
+    return 0;
+}
+
+int alloc_page_end(struct pt_regs *ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u64 end = bpf_ktime_get_ns();
+    char comm[TASK_COMM_LEN];
+    char target[TASK_COMM_LEN] = "TARGET_COMM";
+
+    bpf_get_current_comm(&comm, sizeof(comm));
+    if (FILTER_PROC)
+        return 0;
+
+    u64 *start;
+    struct fault_info_t *info;
+
+    start = alloc_start.lookup(&pid_tgid);
+    if (start == 0)
+        return 0;
+
+    info = fault_stats.lookup(&pid_tgid);
+    if (info == 0) {
+        return 0;
+    }
+
+    info->time_allocing += end - *start;
+
+    fault_stats.update(&pid_tgid, info);
+
+    return 0;
+}
+
+int zero_page_start(struct pt_regs *ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u64 start = bpf_ktime_get_ns();
+    char comm[TASK_COMM_LEN];
+    char target[TASK_COMM_LEN] = "TARGET_COMM";
+
+    bpf_get_current_comm(&comm, sizeof(comm));
+    if (FILTER_PROC)
+        return 0;
+
+    zero_start.update(&pid_tgid, &start);
+
+    return 0;
+}
+
+int zero_page_end(struct pt_regs *ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u64 end = bpf_ktime_get_ns();
+    char comm[TASK_COMM_LEN];
+    char target[TASK_COMM_LEN] = "TARGET_COMM";
+
+    bpf_get_current_comm(&comm, sizeof(comm));
+    if (FILTER_PROC)
+        return 0;
+
+    u64 *start;
+    struct fault_info_t *info;
+
+    start = zero_start.lookup(&pid_tgid);
+    if (start == 0)
+        return 0;
+
+    info = fault_stats.lookup(&pid_tgid);
+    if (info == 0) {
+        return 0;
+    }
+
+    info->time_zeroing += end - *start;
+
     fault_stats.update(&pid_tgid, info);
 
     return 0;
@@ -134,17 +233,25 @@ if args.ebpf:
 b = BPF(text=bpf_text)
 b.attach_kprobe(event="__handle_mm_fault", fn_name="pf_start")
 b.attach_kretprobe(event="__handle_mm_fault", fn_name="pf_end")
+b.attach_kprobe(event="clear_huge_page", fn_name="zero_page_start")
+b.attach_kprobe(event="ext4_issue_zeroout", fn_name="zero_page_start")
+b.attach_kretprobe(event="clear_huge_page", fn_name="zero_page_end")
+b.attach_kretprobe(event="ext4_issue_zeroout", fn_name="zero_page_end")
+b.attach_kprobe(event="alloc_pages_vma", fn_name="alloc_page_start")
+b.attach_kprobe(event="ext4_ext_map_blocks", fn_name="alloc_page_start")
+b.attach_kretprobe(event="alloc_pages_vma", fn_name="alloc_page_end")
+b.attach_kretprobe(event="ext4_ext_map_blocks", fn_name="alloc_page_end")
 
-header_string = "%-10.10s %-6s %-6s %-14s %-14s %-8s"
-format_string = "%-10.10s %-6d %-6d %-14d %-14d %-8d"
-print(header_string % ("COMM", "PID", "TID", "FAULT_TIME", "FAULT_COUNT", "AVG"))
+header_string = "%-10.10s %-6s %-6s %-14s %-14s %-8s %-14s %-14s"
+format_string = "%-10.10s %-6d %-6d %-14d %-14d %-8d %-14d %-14d"
+print(header_string % ("COMM", "PID", "TID", "FAULT_TIME", "FAULT_COUNT", "AVG", "ALLOC_TIME", "ZERO_TIME"))
 sys.stdout.flush()
 
 def handle_fault_event(cpu, data, size):
     event = b["fault_events"].event(data)
 
     print(format_string % (event.comm, event.pid, event.tgid, event.time_in_fault,
-        event.number_faults, event.time_in_fault / event.number_faults))
+        event.number_faults, event.time_in_fault / event.number_faults, event.time_allocing, event.time_zeroing))
     sys.stdout.flush()
 
 b["fault_events"].open_perf_buffer(handle_fault_event)
