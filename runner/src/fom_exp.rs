@@ -29,6 +29,9 @@ enum Workload {
     AllocTest {
         size: usize,
     },
+    Gups {
+        exp: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Parametrize)]
@@ -90,6 +93,11 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@arg WHICH: +required
              "Which spec worklosd to run.")
         )
+        (@subcommand gups =>
+            (about: "Run the GUPS workload used to eval HeMem")
+            (@arg EXP: +required +takes_value {validator::is::<usize>}
+             "The log of the size of the workload.")
+        )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
         (@arg PERF_COUNTER: --perf_counter +takes_value ... number_of_values(1)
@@ -147,6 +155,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 "xz" => Workload::Spec2017Xz,
                 _ => panic!("Unknown spec workload"),
             }
+        }
+
+        ("gups", Some(sub_m)) => {
+            let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
+            Workload::Gups { exp }
         }
 
         _ => unreachable!(),
@@ -211,9 +224,11 @@ where
     let perf_record_file = "/tmp/perf.data";
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
+    let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
+    let gups_dir = dir!(&bmks_dir, "gups/");
     let scripts_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SCRIPTS_PATH);
     let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
@@ -250,6 +265,7 @@ where
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
         Workload::Spec2017Xz => "xz_s",
+        Workload::Gups { exp: _ } => "gups"
     };
 
     let (
@@ -387,6 +403,20 @@ where
                 )?;
             });
         }
+
+        Workload::Gups { exp } => {
+            time!(timers, "Workload", {
+                run_gups(
+                    &ushell,
+                    &gups_dir,
+                    exp,
+                    Some(&cmd_prefix),
+                    &gups_file,
+                    &runtime_file,
+                    pin_cores[0],
+                )?;
+            });
+        }
     }
 
     // Generate the flamegraph if needed
@@ -475,6 +505,33 @@ fn run_alloc_test(
         cmd_prefix.unwrap_or(""),
         size
     ).cwd(bmks_dir))?;
+    let duration = Instant::now() - start;
+
+    ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
+    Ok(())
+}
+
+fn run_gups(
+    ushell: &SshShell,
+    gups_dir: &str,
+    exp: usize,
+    cmd_prefix: Option<&str>,
+    gups_file: &str,
+    runtime_file: &str,
+    pin_core: usize
+) -> Result<(), failure::Error> {
+    let size = 1 << exp;
+    let num_updates = size * 100;
+
+    let start = Instant::now();
+    ushell.run(cmd!(
+        "sudo taskset -c {} {} ./gups 1 {} {} 8 | tee {}",
+        pin_core,
+        cmd_prefix.unwrap_or(""),
+        num_updates,
+        exp,
+        gups_file,
+    ).cwd(gups_dir))?;
     let duration = Instant::now() - start;
 
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
