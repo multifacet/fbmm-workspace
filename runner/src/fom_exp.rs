@@ -520,8 +520,8 @@ fn run_gups(
     runtime_file: &str,
     pin_core: usize
 ) -> Result<(), failure::Error> {
-    let size = 1 << exp;
-    let num_updates = size * 100;
+    let size: u64 = 1 << exp;
+    let num_updates = size / 8;
 
     let start = Instant::now();
     ushell.run(cmd!(

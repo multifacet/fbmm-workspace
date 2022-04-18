@@ -41,6 +41,7 @@
 #define GUPS_PAGE_SIZE      (4 * 1024)
 #define PAGE_NUM            3
 #define PAGES               2048
+#define ADDRESS             ((void*)0x7f5707200000ul)
 
 int threads;
 
@@ -150,7 +151,7 @@ int main(int argc, char **argv)
   fprintf(stderr, "field of 2^%lu (%lu) bytes\n", expt, size);
   fprintf(stderr, "%ld byte element size (%ld elements total)\n", elt_size, size / elt_size);
 
-  p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
+  p = mmap(ADDRESS, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
   if (p == MAP_FAILED) {
     perror("mmap");
     assert(0);
