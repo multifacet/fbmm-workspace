@@ -327,6 +327,7 @@ where
         // Set up the remote for FOM
         ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
         ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
+        ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
         ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
         ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
