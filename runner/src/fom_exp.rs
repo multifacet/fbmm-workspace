@@ -225,6 +225,7 @@ where
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
+    let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
@@ -362,6 +363,7 @@ where
                     &bmks_dir,
                     size,
                     Some(&cmd_prefix),
+                    &alloc_test_file,
                     &runtime_file,
                     pin_cores[0],
                 )?;
@@ -495,16 +497,18 @@ fn run_alloc_test(
     bmks_dir: &str,
     size: usize,
     cmd_prefix: Option<&str>,
+    alloc_test_file: &str,
     runtime_file: &str,
     pin_core: usize
 ) -> Result<(), failure::Error> {
 
     let start = Instant::now();
     ushell.run(cmd!(
-        "sudo taskset -c {} {} ./alloc_test {}",
+        "sudo taskset -c {} {} ./alloc_test {} | sudo tee {}",
         pin_core,
         cmd_prefix.unwrap_or(""),
-        size
+        size,
+        alloc_test_file
     ).cwd(bmks_dir))?;
     let duration = Instant::now() - start;
 
