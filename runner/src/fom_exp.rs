@@ -50,6 +50,7 @@ struct Config {
     flame_graph: bool,
     fom: bool,
     pmem_size: usize,
+    hugetlb: Option<usize>,
     pte_fault_size: usize,
 
     username: String,
@@ -112,10 +113,13 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg FLAME_GRAPH: --flame_graph
          "Generate a flame graph of the workload.")
         (@arg FOM: --fom
-         requires[PMEM_SIZE]
+         requires[PMEM_SIZE] conflicts_with[HUGETLB]
          "Run the workload with file only memory.")
         (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
          "(Optional) If passed, reserved the specified amount of RAM in GB as PMEM.")
+        (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
+         conflicts_with[FOM]
+         "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
         (@arg PTE_FAULT_SIZE: --pte_fault_size +takes_value {validator::is::<usize>}
          "The number of pages to allocate on a DAX pte fault.")
     }
@@ -172,6 +176,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let fom = sub_m.is_present("FOM");
     let pmem_size = sub_m.value_of("PMEM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
+    let hugetlb = sub_m.value_of("HUGETLB").map(|huge_size| huge_size.parse::<usize>().unwrap());
     let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
     let perf_counters: Vec<String> = sub_m
         .values_of("PERF_COUNTER")
@@ -191,6 +196,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         flame_graph,
         fom,
         pmem_size,
+        hugetlb,
         pte_fault_size,
 
         username: login.username.into(),
@@ -252,6 +258,18 @@ where
     ushell.run(cmd!("sudo update-grub2"))?;
 
     let ushell = connect_and_setup_host(login)?;
+
+    let use_hugetlb = if let Some(hugetlb_size_gb) = &cfg.hugetlb {
+        // There are 512 huge pages per GB
+        let num_pages = hugetlb_size_gb * 1024 / 2;
+        ushell.run(cmd!("sudo hugeadm --pool-pages-min 2MB:{}", num_pages))?;
+        // Print out the huge page reservations for the log
+        ushell.run(cmd!("hugeadm --pool-list"))?;
+
+        true
+    } else {
+        false
+    };
 
     ushell.run(cmd!(
         "echo {} > {}",
@@ -366,6 +384,7 @@ where
                     &alloc_test_file,
                     &runtime_file,
                     pin_cores[0],
+                    use_hugetlb,
                 )?;
             });
         }
@@ -499,15 +518,24 @@ fn run_alloc_test(
     cmd_prefix: Option<&str>,
     alloc_test_file: &str,
     runtime_file: &str,
-    pin_core: usize
+    pin_core: usize,
+    use_hugetlb: bool
 ) -> Result<(), failure::Error> {
+
+    // alloc_test uses MAP_HUGETLB is it has a third arg
+    let hugetlb_arg = if use_hugetlb {
+        "hugetlb"
+    } else {
+        ""
+    };
 
     let start = Instant::now();
     ushell.run(cmd!(
-        "sudo taskset -c {} {} ./alloc_test {} | sudo tee {}",
+        "sudo taskset -c {} {} ./alloc_test {} {} | sudo tee {}",
         pin_core,
         cmd_prefix.unwrap_or(""),
         size,
+        hugetlb_arg,
         alloc_test_file
     ).cwd(bmks_dir))?;
     let duration = Instant::now() - start;

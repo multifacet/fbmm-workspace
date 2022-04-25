@@ -213,6 +213,7 @@ where
             "gfortran",
             "curl",
             "bpfcc-tools",
+            "libhugetlbfs-bin",
         ]),
     };
 
