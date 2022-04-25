@@ -15,10 +15,14 @@ int main(int argc, char *argv[]) {
 	unsigned long long start, end;
 	unsigned long size;
 	void *addr;
+	int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE;
 
 	if (argc < 2) {
 		printf("Missing size in GB.");
 		return -1;
+	}
+	if (argc >= 3) {
+		flags |= MAP_HUGETLB;
 	}
 
 	size = strtoul(argv[1], NULL, 10);
@@ -26,7 +30,7 @@ int main(int argc, char *argv[]) {
 	start = rdtsc();
 
 	addr = mmap(ADDRESS, size << 30, PROT_WRITE | PROT_READ,
-		MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE, -1, 0);
+		flags, -1, 0);
 
 	end = rdtsc();
 	printf("Allocation done in %llu cycles\n", end - start);
