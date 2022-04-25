@@ -29,6 +29,13 @@ int main(int argc, char *argv[]) {
 		MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE, -1, 0);
 
 	end = rdtsc();
-	printf("Done in %llu cycles\n", end - start);
+	printf("Allocation done in %llu cycles\n", end - start);
 	printf("%p\n", addr);
+
+	start = rdtsc();
+	munmap(addr, size << 30);
+	end = rdtsc();
+	printf("Unmap done in %llu cycles\n", end - start);
+
+	return 0;
 }
