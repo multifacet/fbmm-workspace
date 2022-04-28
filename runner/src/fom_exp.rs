@@ -557,7 +557,8 @@ where
 
     dump_sys_info(&ushell)?;
 
-//    ushell.run(cmd!("sudo cpupower frequency-set -g performance",))?;
+    ushell.run(cmd!("sudo LD_LIBRARY_PATH=/usr/lib64/ cpupower frequency-set -g performance",))?;
+    ushell.run(cmd!("lscpu"))?;
     set_kernel_printk_level(&ushell, 5)?;
 
     Ok(ushell)
