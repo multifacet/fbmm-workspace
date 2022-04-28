@@ -28,6 +28,7 @@ enum Workload {
     },
     AllocTest {
         size: usize,
+        num_allocs: usize,
     },
     Gups {
         exp: usize,
@@ -82,6 +83,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (about: "Run the `alloctest` workload.")
             (@arg SIZE: +required +takes_value {validator::is::<usize>}
              "The number of GBs of memory to use")
+            (@arg NUM_ALLOCS: +takes_value {validator::is::<usize>}
+             "The number of calls to mmap to do")
         )
         (@subcommand canneal =>
             (about: "Run the canneal workload.")
@@ -155,7 +158,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let workload = match sub_m.subcommand() {
         ("alloctest", Some(sub_m)) => {
             let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
-            Workload::AllocTest { size }
+            let num_allocs = sub_m.value_of("NUM_ALLOCS").unwrap_or("1").parse::<usize>().unwrap();
+            Workload::AllocTest { size, num_allocs }
         }
 
         ("canneal", Some(sub_m)) => {
@@ -312,7 +316,7 @@ where
 
     let mut cmd_prefix = String::new();
     let proc_name = match &cfg.workload {
-        Workload::AllocTest { size: _ } => "alloc_test",
+        Workload::AllocTest { .. } => "alloc_test",
         Workload::Canneal { workload: _ }=> "canneal",
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
@@ -426,12 +430,13 @@ where
     };
 
     match cfg.workload {
-        Workload::AllocTest { size } => {
+        Workload::AllocTest { size, num_allocs } => {
             time!(timers, "Workload", {
                 run_alloc_test(
                     &ushell,
                     &bmks_dir,
                     size,
+                    num_allocs,
                     Some(&cmd_prefix),
                     &alloc_test_file,
                     &runtime_file,
@@ -568,6 +573,7 @@ fn run_alloc_test(
     ushell: &SshShell,
     bmks_dir: &str,
     size: usize,
+    num_allocs: usize,
     cmd_prefix: Option<&str>,
     alloc_test_file: &str,
     runtime_file: &str,
@@ -584,10 +590,11 @@ fn run_alloc_test(
 
     let start = Instant::now();
     ushell.run(cmd!(
-        "sudo taskset -c {} {} ./alloc_test {} {} | sudo tee {}",
+        "sudo taskset -c {} {} ./alloc_test {} {} {} | sudo tee {}",
         pin_core,
         cmd_prefix.unwrap_or(""),
         size,
+        num_allocs,
         hugetlb_arg,
         alloc_test_file
     ).cwd(bmks_dir))?;
