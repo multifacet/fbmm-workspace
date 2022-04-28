@@ -53,6 +53,13 @@ struct Config {
     hugetlb: Option<usize>,
     pte_fault_size: usize,
 
+    thp_temporal_zero: bool,
+    no_fpm_fix: bool,
+    no_pmem_write_zeroes: bool,
+    track_pfn_insert: bool,
+    mark_inode_dirty: bool,
+    ext4_metadata: bool,
+
     username: String,
     host: String,
 
@@ -122,6 +129,19 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
         (@arg PTE_FAULT_SIZE: --pte_fault_size +takes_value {validator::is::<usize>}
          "The number of pages to allocate on a DAX pte fault.")
+        (@arg THP_TEMPORAL_ZERO: --thp_temporal_zero
+         conflicts_with[FOM] conflicts_with[DISABLE_THP]
+         "Tell the kernel to use the standard erms zeroing for huge pages.")
+        (@arg NO_FPM_FIX: --no_fpm_fix
+         "Tell the kernel to ignore the optimization to the follow_page_mask function for FOM.")
+        (@arg NO_PMEM_WRITE_ZEROES: --no_pmem_write_zeroes
+         "Tell the kernels not to zero FOM pages by copying the zero page.")
+        (@arg TRACK_PFN_INSERT: --track_pfn_insert
+         "Tell the kernel to call the expensive track_pfn_insert function.")
+        (@arg MARK_INODE_DIRTY: --mark_inode_dirty
+         "Tell the kernel to call the expensive mark_inode_dirty function.")
+        (@arg EXT4_METADATA: --ext4_metadata
+         "Have ext4 keep track of metadata, including checksums.")
     }
 }
 
@@ -178,6 +198,12 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let pmem_size = sub_m.value_of("PMEM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
     let hugetlb = sub_m.value_of("HUGETLB").map(|huge_size| huge_size.parse::<usize>().unwrap());
     let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
+    let thp_temporal_zero = sub_m.is_present("THP_TEMPORAL_ZERO");
+    let no_fpm_fix = sub_m.is_present("NO_FPM_FIX");
+    let no_pmem_write_zeroes = sub_m.is_present("NO_PMEM_WRITE_ZEROES");
+    let track_pfn_insert = sub_m.is_present("TRACK_PFN_INSERT");
+    let mark_inode_dirty = sub_m.is_present("MARK_INODE_DIRTY");
+    let ext4_metadata = sub_m.is_present("EXT4_METADATA");
     let perf_counters: Vec<String> = sub_m
         .values_of("PERF_COUNTER")
         .map_or(Vec::new(), |counters| counters.map(Into::into).collect());
@@ -198,6 +224,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         pmem_size,
         hugetlb,
         pte_fault_size,
+
+        thp_temporal_zero,
+        no_fpm_fix,
+        no_pmem_write_zeroes,
+        track_pfn_insert,
+        mark_inode_dirty,
+        ext4_metadata,
 
         username: login.username.into(),
         host: login.hostname.into(),
@@ -346,7 +379,9 @@ where
         // Set up the remote for FOM
         ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
         ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
-        ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
+        if !cfg.ext4_metadata {
+            ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
+        }
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
         ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
         ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
@@ -355,6 +390,23 @@ where
     }
 
     ushell.run(cmd!("echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size", cfg.pte_fault_size))?;
+
+    // Handle disabling optimizations if requested
+    if cfg.thp_temporal_zero {
+        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/nt_huge_page_zero"))?;
+    }
+    if cfg.no_fpm_fix {
+        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/follow_page_mask_fix"))?;
+    }
+    if cfg.no_pmem_write_zeroes {
+        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/pmem_write_zeroes"))?;
+    }
+    if cfg.track_pfn_insert {
+        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/track_pfn_insert"))?;
+    }
+    if cfg.mark_inode_dirty {
+        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/mark_inode_dirty"))?;
+    }
 
     // Start the mm_fault_tracker BPF script if requested
     let mm_fault_tracker_handle = if cfg.mm_fault_tracker {
