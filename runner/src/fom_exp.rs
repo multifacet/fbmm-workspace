@@ -60,6 +60,7 @@ struct Config {
     track_pfn_insert: bool,
     mark_inode_dirty: bool,
     ext4_metadata: bool,
+    no_prealloc: bool,
 
     username: String,
     host: String,
@@ -145,6 +146,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Tell the kernel to call the expensive mark_inode_dirty function.")
         (@arg EXT4_METADATA: --ext4_metadata
          "Have ext4 keep track of metadata, including checksums.")
+        (@arg NO_PREALLOC: --no_prealloc
+         "Do not preallocate memory on MAP_POPULATE.")
     }
 }
 
@@ -207,6 +210,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let no_pmem_write_zeroes = sub_m.is_present("NO_PMEM_WRITE_ZEROES");
     let track_pfn_insert = sub_m.is_present("TRACK_PFN_INSERT");
     let mark_inode_dirty = sub_m.is_present("MARK_INODE_DIRTY");
+    let no_prealloc = sub_m.is_present("NO_PREALLOC");
     let ext4_metadata = sub_m.is_present("EXT4_METADATA");
     let perf_counters: Vec<String> = sub_m
         .values_of("PERF_COUNTER")
@@ -235,6 +239,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         track_pfn_insert,
         mark_inode_dirty,
         ext4_metadata,
+        no_prealloc,
 
         username: login.username.into(),
         host: login.hostname.into(),
@@ -410,6 +415,9 @@ where
     }
     if cfg.mark_inode_dirty {
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/mark_inode_dirty"))?;
+    }
+    if cfg.no_prealloc {
+        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/prealloc_map_populate"))?;
     }
 
     // Start the mm_fault_tracker BPF script if requested
