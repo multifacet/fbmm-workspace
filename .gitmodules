@@ -4,3 +4,6 @@
 [submodule "bmks/YCSB"]
 	path = bmks/YCSB
 	url = https://github.com/brianfrankcooper/YCSB.git
+[submodule "bmks/memcached"]
+	path = bmks/memcached
+	url = https://github.com/memcached/memcached.git

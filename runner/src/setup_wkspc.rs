@@ -204,6 +204,7 @@ fn install_host_dependencies(
             "openjdk-8-jdk",
             "fuse",
             "memcached",
+            "libmemcached-tools",
             "redis-server",
             "python3",
             "cmake",
@@ -231,7 +232,7 @@ fn clone_research_workspace<A>(
 where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
-    const SUBMODULES: &[&str] = &["libscail", "bmks/YCSB"];
+    const SUBMODULES: &[&str] = &["libscail", "bmks/YCSB", "bmks/memcached"];
     let user = &cfg.git_user.unwrap_or("");
     let branch = cfg.wkspc_branch.unwrap_or("main");
     let wkspc_repo = GitRepo::HttpsPrivate {
@@ -253,6 +254,7 @@ where
 
 fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     let user_home = get_user_home_dir(ushell)?;
+    let num_cores = libscail::get_num_cores(ushell)?;
 
     ushell.run(cmd!("mkdir -p {}", crate::RESULTS_PATH))?;
 
@@ -263,6 +265,13 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     // Download PARSEC and build canneal
     download_and_extract(ushell, downloads::PARSEC, &user_home, None)?;
     ushell.run(cmd!("./parsecmgmt -a build -p canneal").cwd("parsec-3.0/bin/"))?;
+
+    // memcached
+    with_shell! { ushell in &dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "memcached") =>
+        cmd!("./autogen.sh"),
+        cmd!("./configure"),
+        cmd!("make -j {}", num_cores),
+    }
 
     // Build YCSB
     let ycsb_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "YCSB");
