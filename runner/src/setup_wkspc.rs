@@ -150,7 +150,7 @@ where
     let ushell = SshShell::with_any_key(cfg.login.username, &cfg.login.host)?;
 
     if cfg.host_dep {
-        install_host_dependencies(&ushell, &cfg)?;
+        install_host_dependencies(&ushell)?;
         libscail::install_rust(&ushell)?;
     }
 
@@ -183,12 +183,9 @@ where
     Ok(())
 }
 
-fn install_host_dependencies<A>(
+fn install_host_dependencies(
     ushell: &SshShell,
-    cfg: &SetupConfig<'_, A>,
 ) -> Result<(), failure::Error>
-where
-    A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
     // Make sure we're up to date
     ushell.run(cmd!("sudo apt update; sudo apt upgrade -y"))?;
