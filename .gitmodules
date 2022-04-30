@@ -1,3 +1,6 @@
 [submodule "libscail"]
 	path = libscail
 	url = https://github.com/multifacet/libscail.git
+[submodule "bmks/YCSB"]
+	path = bmks/YCSB
+	url = https://github.com/brianfrankcooper/YCSB.git
