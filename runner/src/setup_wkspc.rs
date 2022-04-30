@@ -214,20 +214,9 @@ where
             "curl",
             "bpfcc-tools",
             "libhugetlbfs-bin",
+            "maven",
         ]),
     };
-
-    // Set up maven
-    let user_home = &get_user_home_dir(&ushell)?;
-    download_and_extract(ushell, downloads::MAVEN, user_home, Some("maven"))?;
-    ushell.run(cmd!(
-        "echo -e 'export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-amd64/\n\
-         export M2_HOME=~{}/maven/\n\
-         export MAVEN_HOME=$M2_HOME\n\
-         export PATH=${{M2_HOME}}/bin:${{PATH}}' | \
-         sudo tee /etc/profile.d/java.sh",
-        cfg.login.username
-    ))?;
 
     // Clone FlameGraph
     let flamegraph_repo = GitRepo::HttpsPublic {
