@@ -221,7 +221,7 @@ where
     let user_home = &get_user_home_dir(&ushell)?;
     download_and_extract(ushell, downloads::MAVEN, user_home, Some("maven"))?;
     ushell.run(cmd!(
-        "echo -e 'export JAVA_HOME=/usr/lib/jvm/java/\n\
+        "echo -e 'export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-amd64/\n\
          export M2_HOME=~{}/maven/\n\
          export MAVEN_HOME=$M2_HOME\n\
          export PATH=${{M2_HOME}}/bin:${{PATH}}' | \
@@ -245,7 +245,7 @@ fn clone_research_workspace<A>(
 where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
-    const SUBMODULES: &[&str] = &["libscail"];
+    const SUBMODULES: &[&str] = &["libscail", "bmks/YCSB"];
     let user = &cfg.git_user.unwrap_or("");
     let branch = cfg.wkspc_branch.unwrap_or("main");
     let wkspc_repo = GitRepo::HttpsPrivate {
@@ -277,6 +277,10 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     // Download PARSEC and build canneal
     download_and_extract(ushell, downloads::PARSEC, &user_home, None)?;
     ushell.run(cmd!("./parsecmgmt -a build -p canneal").cwd("parsec-3.0/bin/"))?;
+
+    // Build YCSB
+    let ycsb_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "YCSB");
+    ushell.run(cmd!("mvn clean package").cwd(ycsb_dir))?;
 
     Ok(())
 }
