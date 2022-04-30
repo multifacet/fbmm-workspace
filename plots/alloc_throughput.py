@@ -4,55 +4,70 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.transforms as transforms
 import numpy as np
+import csv
+import sys
+
+infile = sys.argv[1]
+title = sys.argv[2]
+outname = None
+if len(sys.argv) > 4:
+    outname = sys.argv[2]
+
+KERNEL_ORDER = ["Linux", "FOM", "HugeTLBFS"]
+
+data = {}
 
 barwidth = 0.2
-linux_huge = [1, 2, 3]
-fom_huge = [1, 1.5, 2]
-hugetlb = [4]
-
-linux_base = [5]
-fom_base = [2, 3, 4]
-
 cur_x = 0.2
 
 xticks = []
 tick_labels = []
+kernels = set()
+
+with open(infile, 'r') as f:
+    reader = csv.DictReader(f)
+
+    for row in reader:
+        kernel = row['Kernel']
+        opt = row['Optimization']
+        tput = float(row['Throughput'])
+
+        kernels.add(kernel)
+        if kernel in data:
+            data[kernel].append((opt, tput))
+        else:
+            data[kernel] = [(opt, tput)]
+
+kernels = sorted(list(kernels), key = lambda w: KERNEL_ORDER.index(w))
 
 plt.figure()
 
 def plot_stacked_bars(cur_x, vals):
     bottom = 0
-    for val in vals:
-        plt.bar(cur_x, val - bottom, width=barwidth, bottom=bottom)
-        bottom = val
+    for opt,tput in vals:
+        if opt == "Initial":
+            color = "blue"
+        else:
+            color = None
+        plt.bar(cur_x, tput - bottom, width=barwidth, bottom=bottom, label=opt, color=color)
+        bottom = tput
 
 # Plot the huge page stuff
-xticks.append(cur_x)
-tick_labels.append("Linux Huge")
-plot_stacked_bars(cur_x, linux_huge)
+for k in kernels:
+    xticks.append(cur_x)
+    tick_labels.append(k)
 
-cur_x += barwidth
-xticks.append(cur_x)
-tick_labels.append("FOM Huge")
-plot_stacked_bars(cur_x, fom_huge)
+    print(data[k])
+    data[k].sort(key=lambda w: w[1])
+    print(data[k])
+    plot_stacked_bars(cur_x, data[k])
 
-cur_x += barwidth
-xticks.append(cur_x)
-tick_labels.append("HugeTLBFS")
-plot_stacked_bars(cur_x, hugetlb)
-
-cur_x += 2*barwidth
-
-xticks.append(cur_x)
-tick_labels.append("Linux Base")
-plot_stacked_bars(cur_x, linux_base)
-
-cur_x += barwidth
-xticks.append(cur_x)
-tick_labels.append("FOM Base")
-plot_stacked_bars(cur_x, fom_base)
+    cur_x += 2 * barwidth
 
 plt.xticks(xticks, tick_labels)
 plt.ylabel("Allocation Throughput (GB/s)")
+plt.legend()
 
+if outname:
+    plt.savefig(outname)
 plt.show()
