@@ -14,7 +14,7 @@ if len(sys.argv) >= 4:
     outname = sys.argv[3]
 
 KERNEL_ORDER = ["Linux", "FOM", "HugeTLBFS"]
-colors = ["tab:orange", "tab:green", "tab:red", "tab:purple",
+colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
           "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
 
 data = {}
@@ -42,15 +42,16 @@ with open(infile, 'r') as f:
 
 kernels = sorted(list(kernels), key = lambda w: KERNEL_ORDER.index(w))
 
-plt.figure(figsize=(5, 3.5))
+plt.figure(figsize=(10, 7))
 
 def plot_stacked_bars(cur_x, vals, color_index):
     bottom = 0
     for opt,tput in vals:
         if opt == "Initial":
-            color = "tab:blue"
+            color = colors[0]
             if color_index == 0:
                 label = opt
+                color_index += 1
             else:
                 label = None
         else:
@@ -73,10 +74,12 @@ for k in kernels:
     cur_x += 2 * barwidth
 
 plt.xticks(xticks, tick_labels)
-plt.ylabel("Allocation Throughput (GB/s)")
+plt.ylabel("Throughput (GB/s)")
 plt.title(title)
-plt.legend()
+# Don't print the legend if there was only one label
+if color_index > 1:
+    plt.legend(bbox_to_anchor=(1.01, 1), loc="upper left")
 
 if outname:
-    plt.savefig(outname)
+    plt.savefig(outname, bbox_inches="tight")
 plt.show()
