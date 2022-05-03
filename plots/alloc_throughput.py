@@ -10,10 +10,12 @@ import sys
 infile = sys.argv[1]
 title = sys.argv[2]
 outname = None
-if len(sys.argv) > 4:
-    outname = sys.argv[2]
+if len(sys.argv) >= 4:
+    outname = sys.argv[3]
 
 KERNEL_ORDER = ["Linux", "FOM", "HugeTLBFS"]
+colors = ["tab:orange", "tab:green", "tab:red", "tab:purple",
+          "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
 
 data = {}
 
@@ -40,32 +42,39 @@ with open(infile, 'r') as f:
 
 kernels = sorted(list(kernels), key = lambda w: KERNEL_ORDER.index(w))
 
-plt.figure()
+plt.figure(figsize=(5, 3.5))
 
-def plot_stacked_bars(cur_x, vals):
+def plot_stacked_bars(cur_x, vals, color_index):
     bottom = 0
     for opt,tput in vals:
         if opt == "Initial":
-            color = "blue"
+            color = "tab:blue"
+            if color_index == 0:
+                label = opt
+            else:
+                label = None
         else:
-            color = None
-        plt.bar(cur_x, tput - bottom, width=barwidth, bottom=bottom, label=opt, color=color)
+            color = colors[color_index]
+            label = opt
+            color_index += 1
+        plt.bar(cur_x, tput - bottom, width=barwidth, bottom=bottom, label=label, color=color)
         bottom = tput
+    return color_index
 
 # Plot the huge page stuff
+color_index = 0
 for k in kernels:
     xticks.append(cur_x)
     tick_labels.append(k)
 
-    print(data[k])
     data[k].sort(key=lambda w: w[1])
-    print(data[k])
-    plot_stacked_bars(cur_x, data[k])
+    color_index = plot_stacked_bars(cur_x, data[k], color_index)
 
     cur_x += 2 * barwidth
 
 plt.xticks(xticks, tick_labels)
 plt.ylabel("Allocation Throughput (GB/s)")
+plt.title(title)
 plt.legend()
 
 if outname:
