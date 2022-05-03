@@ -7,7 +7,8 @@ use libscail::{
     time, Login,
     workloads::{
         run_canneal, run_spec17, CannealWorkload, Spec2017Workload,
-        gen_perf_command_prefix, TasksetCtx,
+        gen_perf_command_prefix, TasksetCtx, YcsbWorkload, YcsbSession,
+        YcsbSystem, YcsbConfig, MemcachedWorkloadConfig,
     },
     validator,
 };
@@ -32,6 +33,12 @@ enum Workload {
     },
     Gups {
         exp: usize,
+    },
+    Memcached {
+        size: usize,
+        op_count: usize,
+        read_prop: f32,
+        update_prop: f32,
     },
 }
 
@@ -109,6 +116,20 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (about: "Run the GUPS workload used to eval HeMem")
             (@arg EXP: +required +takes_value {validator::is::<usize>}
              "The log of the size of the workload.")
+        )
+        (@subcommand memcached =>
+            (about: "Run the memcached workload driven by YCSB")
+            (@arg SIZE: +required +takes_value {validator::is::<usize>}
+             "The number of GBs for the workload.")
+            (@arg OP_COUNT: --op_count +takes_value {validator::is::<usize>}
+             "The number of operations to perform during the workload.\
+             The default is 1000.")
+            (@arg READ_PROP: --read_prop +takes_value {validator::is::<f32>}
+             "The proportion of read operations to perform as a value between 0 and 1.\
+             The default is 0.5. The proportion on insert operations will be 1 - read_prop - update_prop.")
+            (@arg UPDATE_PROP: --update_prop +takes_value {validator::is::<f32>}
+             "The proportion of read operations to perform as a value between 0 and 1.\
+             The default is 0.5. The proportion on insert operations will be 1 - read_prop - update_prop")
         )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
@@ -193,6 +214,15 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             Workload::Gups { exp }
         }
 
+        ("memcached", Some(sub_m)) => {
+            let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
+            let op_count = sub_m.value_of("OP_COUNT").unwrap_or("1000").parse::<usize>().unwrap();
+            let read_prop = sub_m.value_of("READ_PROP").unwrap_or("0.5").parse::<f32>().unwrap();
+            let update_prop = sub_m.value_of("UPDATE_PROP").unwrap_or("0.5").parse::<f32>().unwrap();
+
+            Workload::Memcached { size, op_count, read_prop, update_prop }
+        }
+
         _ => unreachable!(),
     };
 
@@ -274,10 +304,13 @@ where
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
     let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
+    let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
+    let ycsb_dir = dir!(&bmks_dir, "YCSB");
+    let memcached_dir = dir!(&bmks_dir, "memcached/");
     let scripts_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SCRIPTS_PATH);
     let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
@@ -326,7 +359,8 @@ where
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
         Workload::Spec2017Xz => "xz_s",
-        Workload::Gups { exp: _ } => "gups"
+        Workload::Gups { exp: _ } => "gups",
+        Workload::Memcached { .. } => "memcached",
     };
 
     let (
@@ -383,7 +417,7 @@ where
     }
 
     if cfg.fom {
-        cmd_prefix.push_str(&format!("{}/fom_wrapper ", bmks_dir));
+        cmd_prefix.push_str(&format!("sudo {}/fom_wrapper ", bmks_dir));
 
         // Set up the remote for FOM
         ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
@@ -419,6 +453,42 @@ where
     if cfg.no_prealloc {
         ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/prealloc_map_populate"))?;
     }
+
+    let ycsb = if let Workload::Memcached { size, op_count, read_prop, update_prop } = cfg.workload {
+        let memcached_cfg = MemcachedWorkloadConfig {
+            user: &login.username,
+            memcached: &memcached_dir,
+            server_size_mb: size << 10,
+            wk_size_gb: size,
+            output_file: None,
+            pintool: None,
+            cmd_prefix: Some(&cmd_prefix),
+            mmu_perf: None,
+            server_start_cb: |_| {Ok(())},
+            allow_oom: true,
+            server_pin_core: None,
+            client_pin_core: 0,
+        };
+        let ycsb_cfg = YcsbConfig {
+            workload: YcsbWorkload::Custom {
+                record_count: op_count,
+                op_count,
+                read_prop,
+                update_prop,
+                insert_prop: 1.0 - read_prop - update_prop,
+            },
+            system: YcsbSystem::Memcached(memcached_cfg),
+            ycsb_path: &ycsb_dir,
+            ycsb_result_file: Some(&ycsb_file),
+        };
+        let mut ycsb = YcsbSession::new(ycsb_cfg);
+
+        ycsb.start_and_load(&ushell)?;
+
+        Some(ycsb)
+    } else {
+        None
+    };
 
     // Start the mm_fault_tracker BPF script if requested
     let mm_fault_tracker_handle = if cfg.mm_fault_tracker {
@@ -503,6 +573,18 @@ where
                     pin_cores[0],
                 )?;
             });
+        }
+
+        Workload::Memcached { .. } => {
+            let mut ycsb = ycsb.unwrap();
+
+            //Run the workload
+            time!(timers, "Workload", ycsb.run(&ushell))?;
+
+            // Make sure the server dies.
+            ushell.run(cmd!("sudo pkill -INT memcached"))?;
+            while let Ok(..) = ushell.run(cmd!("{}/scripts/memcached-tool localhost:11211", memcached_dir)) {}
+            std::thread::sleep(std::time::Duration::from_secs(10));
         }
     }
 
