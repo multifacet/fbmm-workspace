@@ -7,78 +7,92 @@ import numpy as np
 import csv
 import sys
 
-infile = sys.argv[1]
-title = sys.argv[2]
+huge_file = sys.argv[1]
+base_file = sys.argv[2]
 outname = None
 if len(sys.argv) >= 4:
     outname = sys.argv[3]
 
 KERNEL_ORDER = ["Linux", "FOM", "HugeTLBFS"]
-colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
-          "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
-
-data = {}
+colors = {"Baseline": "tab:blue",
+    "Nontemporal Zero": "tab:orange",
+    "follow_page_mask Fix": "tab:green",
+    "Write Zeros Driver": "tab:red",
+    "No track_pfn_insert": "tab:purple",
+    "Disable Metadata": "tab:brown",
+    "Preallocation": "tab:gray"}
+used_labels = {}
 
 barwidth = 0.2
-cur_x = 0.2
 
-xticks = []
-tick_labels = []
-kernels = set()
+def read_file(infile):
+    data = {}
+    kernels = set()
+    with open(infile, 'r') as f:
+        reader = csv.DictReader(f)
 
-with open(infile, 'r') as f:
-    reader = csv.DictReader(f)
+        for row in reader:
+            kernel = row['Kernel']
+            opt = row['Optimization']
+            tput = float(row['Throughput'])
 
-    for row in reader:
-        kernel = row['Kernel']
-        opt = row['Optimization']
-        tput = float(row['Throughput'])
+            kernels.add(kernel)
+            if kernel in data:
+                data[kernel].append((opt, tput))
+            else:
+                data[kernel] = [(opt, tput)]
+    return (data, kernels)
 
-        kernels.add(kernel)
-        if kernel in data:
-            data[kernel].append((opt, tput))
-        else:
-            data[kernel] = [(opt, tput)]
-
-kernels = sorted(list(kernels), key = lambda w: KERNEL_ORDER.index(w))
-
-plt.figure(figsize=(10, 7))
-
-def plot_stacked_bars(cur_x, vals, color_index):
+def plot_stacked_bars(ax, cur_x, vals):
     bottom = 0
     for opt,tput in vals:
-        if opt == "Initial":
-            color = colors[0]
-            if color_index == 0:
-                label = opt
-                color_index += 1
-            else:
-                label = None
+        color = colors[opt]
+        if opt in used_labels:
+            label = None
         else:
-            color = colors[color_index]
             label = opt
-            color_index += 1
-        plt.bar(cur_x, tput - bottom, width=barwidth, bottom=bottom, label=label, color=color)
+            used_labels[opt] = True
+        ax.bar(cur_x, tput - bottom, width=barwidth, bottom=bottom, label=label, color=color)
         bottom = tput
-    return color_index
 
-# Plot the huge page stuff
-color_index = 0
-for k in kernels:
-    xticks.append(cur_x)
-    tick_labels.append(k)
+def make_plot(ax, data, kernels):
+    kernels = sorted(list(kernels), key = lambda w: KERNEL_ORDER.index(w))
+    cur_x = 0.2
+    xticks = []
+    tick_labels = []
 
-    data[k].sort(key=lambda w: w[1])
-    color_index = plot_stacked_bars(cur_x, data[k], color_index)
+    # Plot the huge page stuff
+    for k in kernels:
+        xticks.append(cur_x)
+        tick_labels.append(k)
 
-    cur_x += 2 * barwidth
+        data[k].sort(key=lambda w: w[1])
+        plot_stacked_bars(ax, cur_x, data[k])
 
-plt.xticks(xticks, tick_labels)
-plt.ylabel("Throughput (GB/s)")
-plt.title(title)
-# Don't print the legend if there was only one label
-if color_index > 1:
-    plt.legend(bbox_to_anchor=(1.01, 1), loc="upper left")
+        cur_x += 2 * barwidth
+
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(tick_labels)
+    ax.set_ylabel("Throughput (GB/s)")
+
+
+(huge_data, huge_kernels) = read_file(huge_file)
+(base_data, base_kernels) = read_file(base_file)
+
+fig, (base_ax, huge_ax) = plt.subplots(1, 2, figsize=(10,7))
+base_ax.set_title("Base Pages")
+huge_ax.set_title("Huge Pages")
+
+make_plot(base_ax, base_data, base_kernels)
+make_plot(huge_ax, huge_data, huge_kernels)
+
+handles = []
+labels = []
+for ax in fig.axes:
+    (h, l) = ax.get_legend_handles_labels()
+    handles.extend(h)
+    labels.extend(l)
+plt.legend(handles, labels, bbox_to_anchor=(1.01, 1), loc="upper left")
 
 if outname:
     plt.savefig(outname, bbox_inches="tight")
