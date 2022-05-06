@@ -12,7 +12,7 @@ outname = None
 if len(sys.argv) >= 3:
     outname = sys.argv[2]
 
-KERNEL_ODER = ["Linux", "FOM", "HugeTLBFS"]
+KERNEL_ORDER = ["Linux", "FOM", "HugeTLBFS"]
 
 barwidth = 0.2
 
@@ -29,7 +29,7 @@ with open(infile, 'r') as f:
         kernels.add(kernel)
         data[(kernel, thp)] = gups
 
-kernels = sorted(list(kernels), key = lambda w: KERNEL_ODER.index(w))
+kernels = sorted(list(kernels), key = lambda w: KERNEL_ORDER.index(w))
 
 def make_plot(ax, data, kernels, thp):
     cur_x = 0.2
