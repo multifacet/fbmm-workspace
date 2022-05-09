@@ -466,6 +466,7 @@ where
             mmu_perf: None,
             server_start_cb: |_| {Ok(())},
             allow_oom: true,
+            hugepages: !cfg.disable_thp,
             server_pin_core: None,
             client_pin_core: 0,
         };
@@ -584,7 +585,7 @@ where
             // Make sure the server dies.
             ushell.run(cmd!("sudo pkill -INT memcached"))?;
             while let Ok(..) = ushell.run(cmd!("{}/scripts/memcached-tool localhost:11211", memcached_dir)) {}
-            std::thread::sleep(std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_secs(20));
         }
     }
 
