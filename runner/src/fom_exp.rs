@@ -1,6 +1,7 @@
 use clap::clap_app;
 
 use libscail::{
+    background::{BackgroundContext, BackgroundTask},
     dir, dump_sys_info, set_kernel_printk_level,
     get_user_home_dir,
     output::{Parametrize, Timestamp},
@@ -18,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use spurs::{cmd, Execute, SshShell};
 use spurs_util::escape_for_bash;
 use std::time::Instant;
+
+pub const PERIOD: usize = 10; // seconds
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum Workload {
@@ -56,6 +59,7 @@ struct Config {
     disable_aslr: bool,
     mm_fault_tracker: bool,
     flame_graph: bool,
+    smaps_periodic: bool,
     fom: bool,
     pmem_size: usize,
     hugetlb: Option<usize>,
@@ -144,6 +148,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Record page fault statistics with mm_fault_tracker.")
         (@arg FLAME_GRAPH: --flame_graph
          "Generate a flame graph of the workload.")
+        (@arg SMAPS_PERIODIC: --smaps_periodic
+         "Collect /proc/[PID]/smaps data periodically for the workload process")
         (@arg FOM: --fom
          requires[PMEM_SIZE] conflicts_with[HUGETLB]
          "Run the workload with file only memory.")
@@ -231,6 +237,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let disable_aslr = sub_m.is_present("DISABLE_ASLR");
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
+    let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
     let fom = sub_m.is_present("FOM");
     let pmem_size = sub_m.value_of("PMEM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
     let hugetlb = sub_m.value_of("HUGETLB").map(|huge_size| huge_size.parse::<usize>().unwrap());
@@ -258,6 +265,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         disable_aslr,
         mm_fault_tracker,
         flame_graph,
+        smaps_periodic,
         fom,
         pmem_size,
         hugetlb,
@@ -302,6 +310,7 @@ where
     let perf_record_file = "/tmp/perf.data";
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
+    let smaps_file = dir!(&results_dir, cfg.gen_file_name("smaps"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
     let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
     let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
@@ -414,6 +423,22 @@ where
         cmd_prefix.push_str(
             &format!("sudo perf record -a -C {} -g -F 99 -o {} ", pin_cores_str, &perf_record_file)
         );
+    }
+
+    let mut bgctx = BackgroundContext::new(&ushell);
+    if cfg.smaps_periodic {
+        bgctx.spawn(BackgroundTask {
+            name: "smaps",
+            period: PERIOD,
+            cmd: format!(
+                "((sudo cat /proc/`pgrep -x {}  | sort -n \
+                    | head -n1`/smaps) || echo none) | tee -a {}",
+                &proc_name,
+                &smaps_file
+            ),
+            ensure_started: smaps_file,
+        })?;
+
     }
 
     if cfg.fom {
