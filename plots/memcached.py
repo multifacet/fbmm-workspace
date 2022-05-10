@@ -46,18 +46,24 @@ tick_labels = []
 
 for wkld in wklds:
     start_x = cur_x
-    for kernel in kernels:
-        tput_base = data[(kernel, wkld, False)]
-        tput_huge = data[(kernel, wkld, True)]
+    for hpage in [True, False]:
+        for kernel in kernels:
+            tput = data[(kernel, wkld, hpage)]
+#            tput_base = data[(kernel, wkld, False)]
+#            tput_huge = data[(kernel, wkld, True)]
 
-        color = colors[kernel]
+            color = colors[kernel]
+            if not hpage:
+                hatch = "//"
+            else:
+                hatch = None
 
-        plt.bar(cur_x, tput_huge, width=barwidth, color=color,
-            edgecolor="black", linewidth=0.5)
-        cur_x += barwidth
-        plt.bar(cur_x, tput_base, width=barwidth, color=color, hatch="/",
-            edgecolor="black", linewidth=0.5)
-        cur_x += barwidth
+            plt.bar(cur_x, tput, width=barwidth, color=color, hatch=hatch,
+                edgecolor="black", linewidth=0.5)
+            cur_x += barwidth
+#            plt.bar(cur_x, tput_base, width=barwidth, color=color, hatch="/",
+#                edgecolor="black", linewidth=0.5)
+#            cur_x += barwidth
     
     xticks.append((start_x + cur_x - barwidth) / 2)
     tick_labels.append(wkld)
@@ -72,9 +78,9 @@ for k in kernels:
     legend_elements.append(Patch(facecolor=colors[k], edgecolor="k", label=b_label,
         hatch="///"))
 
-plt.xticks(ticks=xticks, labels=tick_labels)
-plt.ylabel("Throughput (ops/sec)")
-plt.legend(handles=legend_elements, bbox_to_anchor=(1.01, 1), loc="upper left")
+plt.xticks(ticks=xticks, labels=tick_labels, fontsize=16)
+plt.ylabel("Throughput (ops/sec)", fontsize=16)
+plt.legend(handles=legend_elements, bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=14)
 
 if outname:
     plt.savefig(outname, bbox_inches="tight")

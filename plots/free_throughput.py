@@ -58,11 +58,11 @@ for k in kernels:
 # Determine if we need to truncate the graph
 if highest/second_highest > 5:
     plt.ylim((0, second_highest * 1.1))
-    plt.text(highest_pos, second_highest * 1.09, str(int(data[highest_kernel])), ha='center', va='top')
+    plt.text(highest_pos, second_highest * 1.09, str(int(data[highest_kernel])), color='white', fontsize=12, ha='center', va='top')
 
-plt.xticks(xticks, tick_labels)
-plt.ylabel("Throughput (GB/s)")
-plt.title(title)
+plt.xticks(xticks, tick_labels, fontsize=16)
+plt.ylabel("Throughput (GB/s)", fontsize=16)
+plt.title(title, fontsize=16)
 
 if outname:
     plt.savefig(outname, bbox_inches="tight")

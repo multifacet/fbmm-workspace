@@ -72,16 +72,16 @@ def make_plot(ax, data, kernels):
         cur_x += 2 * barwidth
 
     ax.set_xticks(xticks)
-    ax.set_xticklabels(tick_labels)
-    ax.set_ylabel("Throughput (GB/s)")
+    ax.set_xticklabels(tick_labels, fontsize=16)
+    ax.set_ylabel("Throughput (GB/s)", fontsize=16)
 
 
 (huge_data, huge_kernels) = read_file(huge_file)
 (base_data, base_kernels) = read_file(base_file)
 
 fig, (base_ax, huge_ax) = plt.subplots(1, 2, figsize=(10,7))
-base_ax.set_title("Base Pages")
-huge_ax.set_title("Huge Pages")
+base_ax.set_title("Base Pages", fontsize=16)
+huge_ax.set_title("Huge Pages", fontsize=16)
 
 make_plot(base_ax, base_data, base_kernels)
 make_plot(huge_ax, huge_data, huge_kernels)
@@ -92,7 +92,7 @@ for ax in fig.axes:
     (h, l) = ax.get_legend_handles_labels()
     handles.extend(h)
     labels.extend(l)
-plt.legend(handles, labels, bbox_to_anchor=(1.01, 1), loc="upper left")
+plt.legend(handles, labels, bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=14)
 
 if outname:
     plt.savefig(outname, bbox_inches="tight")

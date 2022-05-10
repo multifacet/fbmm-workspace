@@ -46,12 +46,12 @@ def make_plot(ax, data, kernels, thp):
 
         cur_x += 2 * barwidth
     ax.set_xticks(xticks)
-    ax.set_xticklabels(tick_labels)
+    ax.set_xticklabels(tick_labels, fontsize=16)
 
 fig, (base_ax, huge_ax) = plt.subplots(1, 2, sharey=True, figsize=(10,7))
-base_ax.set_title("Base Pages")
-huge_ax.set_title("Huge Pages")
-base_ax.set_ylabel("GUPS")
+base_ax.set_title("Base Pages", fontsize=16)
+huge_ax.set_title("Huge Pages", fontsize=16)
+base_ax.set_ylabel("GUPS", fontsize=16)
 
 make_plot(base_ax, data, kernels, False)
 make_plot(huge_ax, data, kernels, True)
