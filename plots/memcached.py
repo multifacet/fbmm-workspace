@@ -70,7 +70,7 @@ for k in kernels:
     b_label = k + " Base"
     legend_elements.append(Patch(facecolor=colors[k], edgecolor="k", label=h_label))
     legend_elements.append(Patch(facecolor=colors[k], edgecolor="k", label=b_label,
-        hatch="/"))
+        hatch="///"))
 
 plt.xticks(ticks=xticks, labels=tick_labels)
 plt.ylabel("Throughput (ops/sec)")
