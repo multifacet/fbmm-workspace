@@ -9,7 +9,7 @@ use libscail::{
     workloads::{
         run_canneal, run_spec17, CannealWorkload, Spec2017Workload,
         gen_perf_command_prefix, TasksetCtx, YcsbWorkload, YcsbSession,
-        YcsbSystem, YcsbConfig, MemcachedWorkloadConfig,
+        YcsbDistribution, YcsbSystem, YcsbConfig, MemcachedWorkloadConfig,
     },
     validator,
 };
@@ -492,13 +492,14 @@ where
             server_start_cb: |_| {Ok(())},
             allow_oom: true,
             hugepages: !cfg.disable_thp,
-            server_pin_core: None,
+            server_pin_core: Some(pin_cores[0]),
             client_pin_core: 0,
         };
         let ycsb_cfg = YcsbConfig {
             workload: YcsbWorkload::Custom {
                 record_count: op_count,
                 op_count,
+                distribution: YcsbDistribution::Uniform,
                 read_prop,
                 update_prop,
                 insert_prop: 1.0 - read_prop - update_prop,
