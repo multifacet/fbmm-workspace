@@ -320,8 +320,6 @@ name = "libscail"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "failure",
- "failure_derive",
  "runner-proc-macro",
  "serde",
  "serde_json",

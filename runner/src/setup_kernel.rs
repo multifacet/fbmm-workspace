@@ -89,7 +89,12 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let git_hash = get_git_hash(&ushell, &kernel_path)?;
     let kernel_localversion = libscail::gen_local_version(branch, &git_hash);
 
-    libscail::build_kernel(
+    let libscail::KernelBuildArtifacts {
+        source_path: _,
+        kbuild_path: _,
+        pkg_path: kernel_deb,
+        headers_pkg_path: kernel_headers_deb,
+    } = libscail::build_kernel(
         &ushell,
         KernelSrc::Git {
             repo_path: kernel_path.clone(),
@@ -104,30 +109,6 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         None,
         true,
     )?;
-
-    // Find the deb package
-    let kernel_deb = ushell
-        .run(cmd!(
-            "ls -Art {} | \
-                grep .*\\.deb |\
-                grep -v headers | \
-                grep -v libc | \
-                grep -v dbg | \
-                tail -n 1",
-            kernel_path
-        ))?
-        .stdout;
-    let kernel_headers_deb = ushell
-        .run(cmd!(
-            "ls -Art {} | \
-                grep .*\\.deb | \
-                grep headers | \
-                tail -n 1",
-            kernel_path
-        ))?
-        .stdout;
-    let kernel_deb = kernel_deb.trim();
-    let kernel_headers_deb = kernel_headers_deb.trim();
 
     ushell.run(cmd!("sudo dpkg -i {} {}", kernel_deb, kernel_headers_deb).cwd(kernel_path))?;
     ushell.run(cmd!("sudo grub-set-default 0"))?;
