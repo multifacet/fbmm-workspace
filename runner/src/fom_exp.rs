@@ -2,16 +2,15 @@ use clap::clap_app;
 
 use libscail::{
     background::{BackgroundContext, BackgroundTask},
-    dir, dump_sys_info, set_kernel_printk_level,
-    get_user_home_dir,
+    dir, dump_sys_info, get_user_home_dir,
     output::{Parametrize, Timestamp},
-    time, Login,
+    set_kernel_printk_level, time, validator,
     workloads::{
-        run_canneal, run_spec17, CannealWorkload, Spec2017Workload,
-        gen_perf_command_prefix, TasksetCtx, YcsbWorkload, YcsbSession,
-        YcsbDistribution, YcsbSystem, YcsbConfig, MemcachedWorkloadConfig,
+        gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig,
+        Spec2017Workload, TasksetCtx, YcsbConfig, YcsbDistribution, YcsbSession, YcsbSystem,
+        YcsbWorkload,
     },
-    validator,
+    Login,
 };
 
 use serde::{Deserialize, Serialize};
@@ -197,7 +196,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let workload = match sub_m.subcommand() {
         ("alloctest", Some(sub_m)) => {
             let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
-            let num_allocs = sub_m.value_of("NUM_ALLOCS").unwrap_or("1").parse::<usize>().unwrap();
+            let num_allocs = sub_m
+                .value_of("NUM_ALLOCS")
+                .unwrap_or("1")
+                .parse::<usize>()
+                .unwrap();
             Workload::AllocTest { size, num_allocs }
         }
 
@@ -215,14 +218,12 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             Workload::Canneal { workload }
         }
 
-        ("spec17", Some(sub_m)) => {
-            match sub_m.value_of("WHICH").unwrap() {
-                "mcf" => Workload::Spec2017Mcf,
-                "xalancbmk" => Workload::Spec2017Xalancbmk,
-                "xz" => Workload::Spec2017Xz,
-                _ => panic!("Unknown spec workload"),
-            }
-        }
+        ("spec17", Some(sub_m)) => match sub_m.value_of("WHICH").unwrap() {
+            "mcf" => Workload::Spec2017Mcf,
+            "xalancbmk" => Workload::Spec2017Xalancbmk,
+            "xz" => Workload::Spec2017Xz,
+            _ => panic!("Unknown spec workload"),
+        },
 
         ("gups", Some(sub_m)) => {
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
@@ -231,11 +232,28 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         ("memcached", Some(sub_m)) => {
             let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
-            let op_count = sub_m.value_of("OP_COUNT").unwrap_or("1000").parse::<usize>().unwrap();
-            let read_prop = sub_m.value_of("READ_PROP").unwrap_or("0.5").parse::<f32>().unwrap();
-            let update_prop = sub_m.value_of("UPDATE_PROP").unwrap_or("0.5").parse::<f32>().unwrap();
+            let op_count = sub_m
+                .value_of("OP_COUNT")
+                .unwrap_or("1000")
+                .parse::<usize>()
+                .unwrap();
+            let read_prop = sub_m
+                .value_of("READ_PROP")
+                .unwrap_or("0.5")
+                .parse::<f32>()
+                .unwrap();
+            let update_prop = sub_m
+                .value_of("UPDATE_PROP")
+                .unwrap_or("0.5")
+                .parse::<f32>()
+                .unwrap();
 
-            Workload::Memcached { size, op_count, read_prop, update_prop }
+            Workload::Memcached {
+                size,
+                op_count,
+                read_prop,
+                update_prop,
+            }
         }
 
         _ => unreachable!(),
@@ -250,17 +268,30 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let fom = sub_m.value_of("FOM").map(|fs| {
         if fs == "ext4" {
             FomFS::Ext4
-        }
-        else if fs == "FOMTierFS" {
+        } else if fs == "FOMTierFS" {
             FomFS::FOMTierFS
         } else {
             panic!("Invalid FOM file system: {fs}");
         }
     });
-    let dram_size = sub_m.value_of("DRAM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
-    let pmem_size = sub_m.value_of("PMEM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
-    let hugetlb = sub_m.value_of("HUGETLB").map(|huge_size| huge_size.parse::<usize>().unwrap());
-    let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
+    let dram_size = sub_m
+        .value_of("DRAM_SIZE")
+        .unwrap_or("0")
+        .parse::<usize>()
+        .unwrap();
+    let pmem_size = sub_m
+        .value_of("PMEM_SIZE")
+        .unwrap_or("0")
+        .parse::<usize>()
+        .unwrap();
+    let hugetlb = sub_m
+        .value_of("HUGETLB")
+        .map(|huge_size| huge_size.parse::<usize>().unwrap());
+    let pte_fault_size = sub_m
+        .value_of("PTE_FAULT_SIZE")
+        .unwrap_or("1")
+        .parse::<usize>()
+        .unwrap();
     let thp_temporal_zero = sub_m.is_present("THP_TEMPORAL_ZERO");
     let no_fpm_fix = sub_m.is_present("NO_FPM_FIX");
     let no_pmem_write_zeroes = sub_m.is_present("NO_PMEM_WRITE_ZEROES");
@@ -340,7 +371,11 @@ where
     let gups_dir = dir!(&bmks_dir, "gups/");
     let ycsb_dir = dir!(&bmks_dir, "YCSB");
     let memcached_dir = dir!(&bmks_dir, "memcached/");
-    let scripts_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::SCRIPTS_PATH);
+    let scripts_dir = dir!(
+        &user_home,
+        crate::RESEARCH_WORKSPACE_PATH,
+        crate::SCRIPTS_PATH
+    );
     let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
 
@@ -360,14 +395,14 @@ where
                     /etc/default/grub | sudo tee /etc/default/grub"#,
                     cfg.dram_size
                 ))?;
-            },
+            }
             FomFS::FOMTierFS => {
                 ushell.run(cmd!(
                     r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
                     cfg.dram_size, cfg.pmem_size, 4 + cfg.dram_size
                 ))?;
-            },
+            }
         }
     }
     // Finally, update the grub config
@@ -396,7 +431,7 @@ where
     let mut cmd_prefix = String::new();
     let proc_name = match &cfg.workload {
         Workload::AllocTest { .. } => "alloc_test",
-        Workload::Canneal { workload: _ }=> "canneal",
+        Workload::Canneal { workload: _ } => "canneal",
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
         Workload::Spec2017Xz => "xz_s",
@@ -419,7 +454,7 @@ where
         transparent_hugepage_defrag,
         transparent_hugepage_khugepaged_defrag,
         1000,
-        1000
+        1000,
     )?;
 
     if cfg.disable_aslr {
@@ -430,20 +465,18 @@ where
 
     // Figure out which cores we will use for the workload
     let pin_cores = match &cfg.workload {
-        Workload::Spec2017Mcf
-        | Workload::Spec2017Xz
-        | Workload::Spec2017Xalancbmk => {
+        Workload::Spec2017Mcf | Workload::Spec2017Xz | Workload::Spec2017Xalancbmk => {
             vec![tctx.next(), tctx.next(), tctx.next(), tctx.next()]
         }
-        _ => vec![tctx.next()]
+        _ => vec![tctx.next()],
     };
 
     if cfg.perf_stat {
-        cmd_prefix.push_str(
-            &gen_perf_command_prefix(
-                perf_stat_file, &cfg.perf_counters, ""
-            )
-        );
+        cmd_prefix.push_str(&gen_perf_command_prefix(
+            perf_stat_file,
+            &cfg.perf_counters,
+            "",
+        ));
     }
 
     if cfg.flame_graph {
@@ -452,9 +485,10 @@ where
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        cmd_prefix.push_str(
-            &format!("sudo perf record -a -C {} -g -F 99 -o {} ", pin_cores_str, &perf_record_file)
-        );
+        cmd_prefix.push_str(&format!(
+            "sudo perf record -a -C {} -g -F 99 -o {} ",
+            pin_cores_str, &perf_record_file
+        ));
     }
 
     let mut bgctx = BackgroundContext::new(&ushell);
@@ -465,12 +499,10 @@ where
             cmd: format!(
                 "((sudo cat /proc/`pgrep -x {}  | sort -n \
                     | head -n1`/smaps) || echo none) | tee -a {}",
-                &proc_name,
-                &smaps_file
+                &proc_name, &smaps_file
             ),
             ensure_started: smaps_file,
         })?;
-
     }
 
     if let Some(fs) = &cfg.fom {
@@ -488,40 +520,69 @@ where
                     ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
                 }
                 ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
-            },
+            }
             FomFS::FOMTierFS => {
-                ushell.run(cmd!("sudo insmod {}/FOMTierFS/fomtierfs.ko", crate::KERNEL_PATH))?;
-                ushell.run(cmd!("sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 /dev/pmem0 daxtmp/"))?;
-            },
+                ushell.run(cmd!(
+                    "sudo insmod {}/FOMTierFS/fomtierfs.ko",
+                    crate::KERNEL_PATH
+                ))?;
+                ushell.run(cmd!(
+                    "sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 /dev/pmem0 daxtmp/"
+                ))?;
+            }
         }
 
-        ushell.run(cmd!("echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fom/file_dir", &user_home))?;
+        ushell.run(cmd!(
+            "echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fom/file_dir",
+            &user_home
+        ))?;
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/state"))?;
     }
 
-    ushell.run(cmd!("echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size", cfg.pte_fault_size))?;
+    ushell.run(cmd!(
+        "echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size",
+        cfg.pte_fault_size
+    ))?;
 
     // Handle disabling optimizations if requested
     if cfg.thp_temporal_zero {
-        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/nt_huge_page_zero"))?;
+        ushell.run(cmd!(
+            "echo 0 | sudo tee /sys/kernel/mm/fom/nt_huge_page_zero"
+        ))?;
     }
     if cfg.no_fpm_fix {
-        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/follow_page_mask_fix"))?;
+        ushell.run(cmd!(
+            "echo 0 | sudo tee /sys/kernel/mm/fom/follow_page_mask_fix"
+        ))?;
     }
     if cfg.no_pmem_write_zeroes {
-        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/pmem_write_zeroes"))?;
+        ushell.run(cmd!(
+            "echo 0 | sudo tee /sys/kernel/mm/fom/pmem_write_zeroes"
+        ))?;
     }
     if cfg.track_pfn_insert {
-        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/track_pfn_insert"))?;
+        ushell.run(cmd!(
+            "echo 1 | sudo tee /sys/kernel/mm/fom/track_pfn_insert"
+        ))?;
     }
     if cfg.mark_inode_dirty {
-        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/mark_inode_dirty"))?;
+        ushell.run(cmd!(
+            "echo 1 | sudo tee /sys/kernel/mm/fom/mark_inode_dirty"
+        ))?;
     }
     if cfg.no_prealloc {
-        ushell.run(cmd!("echo 0 | sudo tee /sys/kernel/mm/fom/prealloc_map_populate"))?;
+        ushell.run(cmd!(
+            "echo 0 | sudo tee /sys/kernel/mm/fom/prealloc_map_populate"
+        ))?;
     }
 
-    let ycsb = if let Workload::Memcached { size, op_count, read_prop, update_prop } = cfg.workload {
+    let ycsb = if let Workload::Memcached {
+        size,
+        op_count,
+        read_prop,
+        update_prop,
+    } = cfg.workload
+    {
         let memcached_cfg = MemcachedWorkloadConfig {
             user: &login.username,
             memcached: &memcached_dir,
@@ -531,7 +592,7 @@ where
             pintool: None,
             cmd_prefix: Some(&cmd_prefix),
             mmu_perf: None,
-            server_start_cb: |_| {Ok(())},
+            server_start_cb: |_| Ok(()),
             allow_oom: true,
             hugepages: !cfg.disable_thp,
             server_pin_core: Some(pin_cores[0]),
@@ -607,9 +668,7 @@ where
             });
         }
 
-        w @ Workload::Spec2017Mcf
-        | w @ Workload::Spec2017Xz
-        | w @ Workload::Spec2017Xalancbmk => {
+        w @ Workload::Spec2017Mcf | w @ Workload::Spec2017Xz | w @ Workload::Spec2017Xalancbmk => {
             let wkload = match w {
                 Workload::Spec2017Mcf => Spec2017Workload::Mcf,
                 Workload::Spec2017Xz => Spec2017Workload::Xz { size: 0 },
@@ -652,7 +711,10 @@ where
 
             // Make sure the server dies.
             ushell.run(cmd!("sudo pkill -INT memcached"))?;
-            while let Ok(..) = ushell.run(cmd!("{}/scripts/memcached-tool localhost:11211", memcached_dir)) {}
+            while let Ok(..) = ushell.run(cmd!(
+                "{}/scripts/memcached-tool localhost:11211",
+                memcached_dir
+            )) {}
             std::thread::sleep(std::time::Duration::from_secs(20));
         }
     }
@@ -663,7 +725,10 @@ where
             "sudo perf script -i {} | ./FlameGraph/stackcollapse-perf.pl > /tmp/flamegraph",
             &perf_record_file,
         ))?;
-        ushell.run(cmd!("./FlameGraph/flamegraph.pl /tmp/flamegraph > {}", flame_graph_file))?;
+        ushell.run(cmd!(
+            "./FlameGraph/flamegraph.pl /tmp/flamegraph > {}",
+            flame_graph_file
+        ))?;
     }
 
     // Clean up the mm_fault_tracker if it was started
@@ -692,7 +757,7 @@ where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
     let ushell = SshShell::with_any_key(login.username, &login.host)?;
-//    spurs_util::reboot(&mut ushell, /* dry_run */ false)?;
+    //    spurs_util::reboot(&mut ushell, /* dry_run */ false)?;
     let _ = ushell.run(cmd!("sudo reboot"));
 
     // Keep trying to connect until we succeed
@@ -721,7 +786,9 @@ where
 
     dump_sys_info(&ushell)?;
 
-    ushell.run(cmd!("sudo LD_LIBRARY_PATH=/usr/lib64/ cpupower frequency-set -g performance",))?;
+    ushell.run(cmd!(
+        "sudo LD_LIBRARY_PATH=/usr/lib64/ cpupower frequency-set -g performance",
+    ))?;
     ushell.run(cmd!("lscpu"))?;
     set_kernel_printk_level(&ushell, 5)?;
 
@@ -737,26 +804,24 @@ fn run_alloc_test(
     alloc_test_file: &str,
     runtime_file: &str,
     pin_core: usize,
-    use_hugetlb: bool
+    use_hugetlb: bool,
 ) -> Result<(), failure::Error> {
-
     // alloc_test uses MAP_HUGETLB is it has a third arg
-    let hugetlb_arg = if use_hugetlb {
-        "hugetlb"
-    } else {
-        ""
-    };
+    let hugetlb_arg = if use_hugetlb { "hugetlb" } else { "" };
 
     let start = Instant::now();
-    ushell.run(cmd!(
-        "sudo taskset -c {} {} ./alloc_test {} {} {} | sudo tee {}",
-        pin_core,
-        cmd_prefix.unwrap_or(""),
-        size,
-        num_allocs,
-        hugetlb_arg,
-        alloc_test_file
-    ).cwd(bmks_dir))?;
+    ushell.run(
+        cmd!(
+            "sudo taskset -c {} {} ./alloc_test {} {} {} | sudo tee {}",
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            size,
+            num_allocs,
+            hugetlb_arg,
+            alloc_test_file
+        )
+        .cwd(bmks_dir),
+    )?;
     let duration = Instant::now() - start;
 
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
@@ -770,20 +835,23 @@ fn run_gups(
     cmd_prefix: Option<&str>,
     gups_file: &str,
     runtime_file: &str,
-    pin_core: usize
+    pin_core: usize,
 ) -> Result<(), failure::Error> {
     let size: u64 = 1 << exp;
     let num_updates = size / 8;
 
     let start = Instant::now();
-    ushell.run(cmd!(
-        "sudo taskset -c {} {} ./gups 1 {} {} 8 | tee {}",
-        pin_core,
-        cmd_prefix.unwrap_or(""),
-        num_updates,
-        exp,
-        gups_file,
-    ).cwd(gups_dir))?;
+    ushell.run(
+        cmd!(
+            "sudo taskset -c {} {} ./gups 1 {} {} 8 | tee {}",
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            num_updates,
+            exp,
+            gups_file,
+        )
+        .cwd(gups_dir),
+    )?;
     let duration = Instant::now() - start;
 
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;

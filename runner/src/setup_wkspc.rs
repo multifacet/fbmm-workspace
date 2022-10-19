@@ -183,10 +183,7 @@ where
     Ok(())
 }
 
-fn install_host_dependencies(
-    ushell: &SshShell,
-) -> Result<(), failure::Error>
-{
+fn install_host_dependencies(ushell: &SshShell) -> Result<(), failure::Error> {
     // Make sure we're up to date
     ushell.run(cmd!("sudo apt update; sudo apt upgrade -y"))?;
 

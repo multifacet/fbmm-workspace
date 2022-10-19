@@ -1,6 +1,6 @@
+mod fom_exp;
 mod setup_kernel;
 mod setup_wkspc;
-mod fom_exp;
 
 const RESULTS_PATH: &str = "results/";
 const RESEARCH_WORKSPACE_PATH: &str = "research-workspace/";
