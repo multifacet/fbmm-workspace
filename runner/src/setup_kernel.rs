@@ -32,6 +32,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@arg INSTALL_PERF: --install_perf
          "(Optional) Install the perf corresponding to this kernel")
+        (@arg FOMTIERFS: --fomtierfs
+         "(Optional) Build the fomtierfs kernel module")
     }
 }
 
@@ -47,6 +49,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let git_user = sub_m.value_of("GIT_USER").unwrap();
     let secret = sub_m.value_of("SECRET");
     let install_perf = sub_m.is_present("INSTALL_PERF");
+    let fomtierfs = sub_m.is_present("FOMTIERFS");
 
     let git_repo = if let Some(_secret) = &secret {
         GitRepo::HttpsPrivate {
@@ -110,8 +113,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         true,
     )?;
 
-    ushell.run(cmd!("sudo dpkg -i {} {}", kernel_deb, kernel_headers_deb).cwd(kernel_path))?;
+    ushell.run(cmd!("sudo dpkg -i {} {}", kernel_deb, kernel_headers_deb).cwd(&kernel_path))?;
     ushell.run(cmd!("sudo grub-set-default 0"))?;
+
+    if fomtierfs {
+        let fomtierfs_dir = dir!(&kernel_path, "FOMTierFS/");
+        ushell.run(cmd!("make").cwd(fomtierfs_dir))?;
+    }
 
     if install_perf {
         // Build perf

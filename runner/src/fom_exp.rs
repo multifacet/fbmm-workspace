@@ -45,6 +45,12 @@ enum Workload {
     },
 }
 
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+enum FomFS {
+    Ext4,
+    FOMTierFS,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Parametrize)]
 struct Config {
     #[name]
@@ -60,7 +66,8 @@ struct Config {
     mm_fault_tracker: bool,
     flame_graph: bool,
     smaps_periodic: bool,
-    fom: bool,
+    fom: Option<FomFS>,
+    dram_size: usize,
     pmem_size: usize,
     hugetlb: Option<usize>,
     pte_fault_size: usize,
@@ -150,11 +157,13 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Generate a flame graph of the workload.")
         (@arg SMAPS_PERIODIC: --smaps_periodic
          "Collect /proc/[PID]/smaps data periodically for the workload process")
-        (@arg FOM: --fom
-         requires[PMEM_SIZE] conflicts_with[HUGETLB]
-         "Run the workload with file only memory.")
+        (@arg FOM: --fom +takes_value
+         requires[DRAM_SIZE] conflicts_with[HUGETLB]
+         "Run the workload with file only memory with the specified FS (either ext4 or FOMTierFS).")
+        (@arg DRAM_SIZE: --dram_size +takes_value {validator::is::<usize>}
+         "(Optional) If passed, reserved the specifies amount of memory in GB as DRAM.")
         (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
-         "(Optional) If passed, reserved the specified amount of RAM in GB as PMEM.")
+         "(Optional) If passed, reserved the specified amount of memory in GB as PMEM.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
          conflicts_with[FOM]
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
@@ -238,7 +247,17 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
-    let fom = sub_m.is_present("FOM");
+    let fom = sub_m.value_of("FOM").map(|fs| {
+        if fs == "ext4" {
+            FomFS::Ext4
+        }
+        else if fs == "FOMTierFS" {
+            FomFS::FOMTierFS
+        } else {
+            panic!("Invalid FOM file system: {fs}");
+        }
+    });
+    let dram_size = sub_m.value_of("DRAM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
     let pmem_size = sub_m.value_of("PMEM_SIZE").unwrap_or("0").parse::<usize>().unwrap();
     let hugetlb = sub_m.value_of("HUGETLB").map(|huge_size| huge_size.parse::<usize>().unwrap());
     let pte_fault_size = sub_m.value_of("PTE_FAULT_SIZE").unwrap_or("1").parse::<usize>().unwrap();
@@ -267,6 +286,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         flame_graph,
         smaps_periodic,
         fom,
+        dram_size,
         pmem_size,
         hugetlb,
         pte_fault_size,
@@ -326,17 +346,29 @@ where
 
     // Setup the pmem settings in the grub config before rebooting
     // First, clear the memmap option from the boot options
+    ushell.run(cmd!("cat /etc/default/grub"))?;
     ushell.run(cmd!(
-        r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)memmap=[0-9]*[KMG]![0-9]*[KMG]\(.*\)"/GRUB_CMDLINE_LINUX="\1 \2"/' \
+        r#"sed 's/ memmap=[0-9]*[KMG]![0-9]*[KMG]//g' \
         /etc/default/grub | sudo tee /etc/default/grub"#
     ))?;
     // Then, if we are doing a pmem experiment, add it in
-    if cfg.fom {
-        ushell.run(cmd!(
-            r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G"/' \
-            /etc/default/grub | sudo tee /etc/default/grub"#,
-            cfg.pmem_size
-        ))?;
+    if let Some(fs) = &cfg.fom {
+        match fs {
+            FomFS::Ext4 => {
+                ushell.run(cmd!(
+                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G"/' \
+                    /etc/default/grub | sudo tee /etc/default/grub"#,
+                    cfg.dram_size
+                ))?;
+            },
+            FomFS::FOMTierFS => {
+                ushell.run(cmd!(
+                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G memmap={}G!{}G"/' \
+                    /etc/default/grub | sudo tee /etc/default/grub"#,
+                    cfg.dram_size, cfg.pmem_size, 4 + cfg.dram_size
+                ))?;
+            },
+        }
     }
     // Finally, update the grub config
     ushell.run(cmd!("sudo update-grub2"))?;
@@ -441,18 +473,28 @@ where
 
     }
 
-    if cfg.fom {
+    if let Some(fs) = &cfg.fom {
         cmd_prefix.push_str(&format!("sudo {}/fom_wrapper ", bmks_dir));
 
         // Set up the remote for FOM
-        ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
-        ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
-        if !cfg.ext4_metadata {
-            ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
-        }
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
-        ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
         ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
+
+        match fs {
+            FomFS::Ext4 => {
+                ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
+                ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
+                if !cfg.ext4_metadata {
+                    ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
+                }
+                ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
+            },
+            FomFS::FOMTierFS => {
+                ushell.run(cmd!("sudo insmod {}/FOMTierFS/fomtierfs.ko", crate::KERNEL_PATH))?;
+                ushell.run(cmd!("sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 /dev/pmem0 daxtmp/"))?;
+            },
+        }
+
         ushell.run(cmd!("echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fom/file_dir", &user_home))?;
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/state"))?;
     }
