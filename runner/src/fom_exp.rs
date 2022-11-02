@@ -527,7 +527,8 @@ where
                     crate::KERNEL_PATH
                 ))?;
                 ushell.run(cmd!(
-                    "sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 /dev/pmem0 daxtmp/"
+                    "sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 -o basepage={} /dev/pmem0 daxtmp/",
+                    cfg.disable_thp
                 ))?;
             }
         }
