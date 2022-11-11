@@ -35,6 +35,7 @@ enum Workload {
     },
     Gups {
         exp: usize,
+        num_updates: usize,
     },
     Memcached {
         size: usize,
@@ -126,6 +127,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (about: "Run the GUPS workload used to eval HeMem")
             (@arg EXP: +required +takes_value {validator::is::<usize>}
              "The log of the size of the workload.")
+            (@arg NUM_UPDATES: +takes_value {validator::is::<usize>}
+             "The number of updates to do. Default is 2^exp / 8")
         )
         (@subcommand memcached =>
             (about: "Run the memcached workload driven by YCSB")
@@ -227,7 +230,12 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         ("gups", Some(sub_m)) => {
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
-            Workload::Gups { exp }
+            let num_updates = if let Some(updates_str) = sub_m.value_of("NUM_UPDATES") {
+                updates_str.parse::<usize>().unwrap()
+            } else {
+                (2 << exp) / 8
+            };
+            Workload::Gups { exp, num_updates }
         }
 
         ("memcached", Some(sub_m)) => {
@@ -435,7 +443,7 @@ where
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
         Workload::Spec2017Xz => "xz_s",
-        Workload::Gups { exp: _ } => "gups",
+        Workload::Gups { .. } => "gups",
         Workload::Memcached { .. } => "memcached",
     };
 
@@ -690,12 +698,13 @@ where
             });
         }
 
-        Workload::Gups { exp } => {
+        Workload::Gups { exp, num_updates } => {
             time!(timers, "Workload", {
                 run_gups(
                     &ushell,
                     &gups_dir,
                     exp,
+                    num_updates,
                     Some(&cmd_prefix),
                     &gups_file,
                     &runtime_file,
@@ -833,14 +842,12 @@ fn run_gups(
     ushell: &SshShell,
     gups_dir: &str,
     exp: usize,
+    num_updates: usize,
     cmd_prefix: Option<&str>,
     gups_file: &str,
     runtime_file: &str,
     pin_core: usize,
 ) -> Result<(), failure::Error> {
-    let size: u64 = 1 << exp;
-    let num_updates = size / 8;
-
     let start = Instant::now();
     ushell.run(
         cmd!(
