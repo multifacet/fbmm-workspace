@@ -729,6 +729,15 @@ where
         }
     }
 
+    // If we are using FOMTierFS, print some stats
+    if let Some(fs) = &cfg.fom {
+        match fs {
+            FomFS::FOMTierFS => {
+                ushell.run(cmd!("cat /sys/fs/fomtierfs/stats | tee {}", &fomtierfs_stats_file))?;
+            }
+            _ => {}
+        }
+    }
     // Generate the flamegraph if needed
     if cfg.flame_graph {
         ushell.run(cmd!(
