@@ -25,7 +25,9 @@ pub const PERIOD: usize = 10; // seconds
 enum Workload {
     Spec2017Mcf,
     Spec2017Xalancbmk,
-    Spec2017Xz,
+    Spec2017Xz {
+        size: usize,
+    },
     Canneal {
         workload: CannealWorkload,
     },
@@ -122,6 +124,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (about: "Run a spec workload on cloudlab")
             (@arg WHICH: +required
              "Which spec worklosd to run.")
+            (@arg SIZE: --spec_size +takes_value {validator::is::<usize>}
+             "The size of the spec workload input.")
         )
         (@subcommand gups =>
             (about: "Run the GUPS workload used to eval HeMem")
@@ -221,11 +225,19 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             Workload::Canneal { workload }
         }
 
-        ("spec17", Some(sub_m)) => match sub_m.value_of("WHICH").unwrap() {
-            "mcf" => Workload::Spec2017Mcf,
-            "xalancbmk" => Workload::Spec2017Xalancbmk,
-            "xz" => Workload::Spec2017Xz,
-            _ => panic!("Unknown spec workload"),
+        ("spec17", Some(sub_m)) => {
+            let size = sub_m
+                .value_of("SIZE")
+                .unwrap_or("0")
+                .parse::<usize>()
+                .unwrap();
+
+            match sub_m.value_of("WHICH").unwrap() {
+                "mcf" => Workload::Spec2017Mcf,
+                "xalancbmk" => Workload::Spec2017Xalancbmk,
+                "xz" => Workload::Spec2017Xz { size },
+                _ => panic!("Unknown spec workload"),
+            }
         },
 
         ("gups", Some(sub_m)) => {
@@ -374,6 +386,7 @@ where
     let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
     let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
+    let fomtierfs_stats_file = dir!(&results_dir, cfg.gen_file_name("fomtierfs_stats"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
@@ -442,7 +455,7 @@ where
         Workload::Canneal { workload: _ } => "canneal",
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
-        Workload::Spec2017Xz => "xz_s",
+        Workload::Spec2017Xz { size: _ } => "xz_s",
         Workload::Gups { .. } => "gups",
         Workload::Memcached { .. } => "memcached",
     };
@@ -473,7 +486,7 @@ where
 
     // Figure out which cores we will use for the workload
     let pin_cores = match &cfg.workload {
-        Workload::Spec2017Mcf | Workload::Spec2017Xz | Workload::Spec2017Xalancbmk => {
+        Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => {
             vec![tctx.next(), tctx.next(), tctx.next(), tctx.next()]
         }
         _ => vec![tctx.next()],
@@ -677,10 +690,10 @@ where
             });
         }
 
-        w @ Workload::Spec2017Mcf | w @ Workload::Spec2017Xz | w @ Workload::Spec2017Xalancbmk => {
+        w @ Workload::Spec2017Mcf | w @ Workload::Spec2017Xz { size: _ } | w @ Workload::Spec2017Xalancbmk => {
             let wkload = match w {
                 Workload::Spec2017Mcf => Spec2017Workload::Mcf,
-                Workload::Spec2017Xz => Spec2017Workload::Xz { size: 0 },
+                Workload::Spec2017Xz { size } => Spec2017Workload::Xz { size },
                 Workload::Spec2017Xalancbmk => Spec2017Workload::Xalancbmk,
                 _ => unreachable!(),
             };
