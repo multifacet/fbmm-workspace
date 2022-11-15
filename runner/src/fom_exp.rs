@@ -233,7 +233,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             let num_updates = if let Some(updates_str) = sub_m.value_of("NUM_UPDATES") {
                 updates_str.parse::<usize>().unwrap()
             } else {
-                (2 << exp) / 8
+                (1 << exp) / 8
             };
             Workload::Gups { exp, num_updates }
         }
