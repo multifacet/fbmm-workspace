@@ -68,9 +68,11 @@ struct Config {
     mm_fault_tracker: bool,
     flame_graph: bool,
     smaps_periodic: bool,
+    lock_stat: bool,
     fom: Option<FomFS>,
     dram_size: usize,
     pmem_size: usize,
+    migrate_task_int: Option<usize>,
     hugetlb: Option<usize>,
     pte_fault_size: usize,
 
@@ -163,6 +165,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Generate a flame graph of the workload.")
         (@arg SMAPS_PERIODIC: --smaps_periodic
          "Collect /proc/[PID]/smaps data periodically for the workload process")
+        (@arg LOCK_STAT: --lock_stat
+         "Collect lock statistics from the workload.")
         (@arg FOM: --fom +takes_value
          requires[DRAM_SIZE] conflicts_with[HUGETLB]
          "Run the workload with file only memory with the specified FS (either ext4 or FOMTierFS).")
@@ -170,6 +174,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "(Optional) If passed, reserved the specifies amount of memory in GB as DRAM.")
         (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
          "(Optional) If passed, reserved the specified amount of memory in GB as PMEM.")
+        (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
+         "(Optional) If passed, sets the migration task interval to the specified value.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
          conflicts_with[FOM]
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
@@ -285,6 +291,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
+    let lock_stat = sub_m.is_present("LOCK_STAT");
     let fom = sub_m.value_of("FOM").map(|fs| {
         if fs == "ext4" {
             FomFS::Ext4
@@ -304,6 +311,9 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         .unwrap_or("0")
         .parse::<usize>()
         .unwrap();
+    let migrate_task_int = sub_m
+        .value_of("MIGRATE_TASK_INT")
+        .map(|interval| interval.parse::<usize>().unwrap());
     let hugetlb = sub_m
         .value_of("HUGETLB")
         .map(|huge_size| huge_size.parse::<usize>().unwrap());
@@ -336,9 +346,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         mm_fault_tracker,
         flame_graph,
         smaps_periodic,
+        lock_stat,
         fom,
         dram_size,
         pmem_size,
+        migrate_task_int,
         hugetlb,
         pte_fault_size,
 
@@ -382,6 +394,7 @@ where
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let smaps_file = dir!(&results_dir, cfg.gen_file_name("smaps"));
+    let lock_stat_file = dir!(&results_dir, cfg.gen_file_name("lock_stat"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
     let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
     let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
@@ -526,6 +539,13 @@ where
         })?;
     }
 
+    if cfg.lock_stat {
+        // Enable collection of statistic
+        ushell.run(cmd!("echo 1 | sudo tee /proc/sys/kernel/lock_stat"))?;
+        // Clear the existing stats is there are any
+        ushell.run(cmd!("echo 0 | sudo tee /proc/lock_stat"))?;
+    }
+
     if let Some(fs) = &cfg.fom {
         cmd_prefix.push_str(&format!("sudo {}/fom_wrapper ", bmks_dir));
 
@@ -551,6 +571,10 @@ where
                     "sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 -o basepage={} /dev/pmem0 daxtmp/",
                     cfg.disable_thp
                 ))?;
+
+                if let Some(interval) = cfg.migrate_task_int {
+                    ushell.run(cmd!("echo {} | sudo tee /sys/fs/fomtierfs/migrate_task_int", interval))?;
+                }
             }
         }
 
@@ -761,6 +785,11 @@ where
             "./FlameGraph/flamegraph.pl /tmp/flamegraph > {}",
             flame_graph_file
         ))?;
+    }
+
+    // Record the lock statistics if needed
+    if cfg.lock_stat {
+        ushell.run(cmd!("sudo cat /proc/lock_stat | sudo tee {}", lock_stat_file))?;
     }
 
     // Clean up the mm_fault_tracker if it was started
