@@ -54,13 +54,13 @@ static inline uintptr_t get_cr3(void)
 static inline uintptr_t get_cr4(void)
 {
 	uintptr_t val;
-	asm volatile("mov %%cr4,%0\n" : "=r"(val) : __FORCE_ODER);
+	asm volatile("mov %%cr4,%0\n" : "=r"(val) : __FORCE_ORDER);
 	return val;
 }
 
 static void do_flush_tlb_all(void *info)
 {
-	__flush_tlb();
+	__flush_tlb_all();
 	// native_read_cr3() disappeared starting from Kernel 4.13. It seems __flush_tlb() exists even in old kernels
 	// so I'll just switch to that, but here's the original in case __flush_tlb doesn't work on some older kernels.
 	// native_write_cr3(native_read_cr3());
