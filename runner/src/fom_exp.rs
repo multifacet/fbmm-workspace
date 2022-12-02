@@ -22,6 +22,12 @@ use std::time::Instant;
 pub const PERIOD: usize = 10; // seconds
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+enum PagewalkCoherenceMode {
+    Speculation,
+    Coherence,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum Workload {
     Spec2017Mcf,
     Spec2017Xalancbmk,
@@ -38,6 +44,9 @@ enum Workload {
     Gups {
         exp: usize,
         num_updates: usize,
+    },
+    PagewalkCoherence {
+        mode: PagewalkCoherenceMode,
     },
     Memcached {
         size: usize,
@@ -135,6 +144,17 @@ pub fn cli_options() -> clap::App<'static, 'static> {
              "The log of the size of the workload.")
             (@arg NUM_UPDATES: +takes_value {validator::is::<usize>}
              "The number of updates to do. Default is 2^exp / 8")
+        )
+        (@subcommand pagewalk_coherence =>
+            (about: "Run the ubmk from https://blog.stuffedcow.net/2015/08/pagewalk-coherence/\
+             to determine what the pagewalk consistency the CPU has.")
+            (@group MODE =>
+                (@attributes +required)
+                (@arg SPECULATION: --speculation
+                 "Run to check for speculation.")
+                (@arg COHERENCE: --coherence
+                 "Run to check basic coherence.")
+            )
         )
         (@subcommand memcached =>
             (about: "Run the memcached workload driven by YCSB")
@@ -254,6 +274,16 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 (1 << exp) / 8
             };
             Workload::Gups { exp, num_updates }
+        }
+
+        ("pagewalk_coherence", Some(sub_m)) => {
+            let mode = if sub_m.is_present("SPECULATION") {
+                PagewalkCoherenceMode::Speculation
+            } else {
+                PagewalkCoherenceMode::Coherence
+            };
+
+            Workload::PagewalkCoherence { mode }
         }
 
         ("memcached", Some(sub_m)) => {
@@ -396,6 +426,7 @@ where
     let smaps_file = dir!(&results_dir, cfg.gen_file_name("smaps"));
     let lock_stat_file = dir!(&results_dir, cfg.gen_file_name("lock_stat"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
+    let coherence_file = dir!(&results_dir, cfg.gen_file_name("coherence"));
     let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
     let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
@@ -403,6 +434,7 @@ where
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
+    let coherence_dir = dir!(&bmks_dir, "pagewalk_coherence/");
     let ycsb_dir = dir!(&bmks_dir, "YCSB");
     let memcached_dir = dir!(&bmks_dir, "memcached/");
     let scripts_dir = dir!(
@@ -470,6 +502,7 @@ where
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
         Workload::Spec2017Xz { size: _ } => "xz_s",
         Workload::Gups { .. } => "gups",
+        Workload::PagewalkCoherence { .. } => "paging",
         Workload::Memcached { .. } => "memcached",
     };
 
@@ -505,23 +538,23 @@ where
         _ => vec![tctx.next()],
     };
 
+    let pin_cores_str = pin_cores
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
     if cfg.perf_stat {
         cmd_prefix.push_str(&gen_perf_command_prefix(
             perf_stat_file,
             &cfg.perf_counters,
-            "",
+            format!(" -C {} ", &pin_cores_str),
         ));
     }
 
     if cfg.flame_graph {
-        let pin_cores_str = pin_cores
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
         cmd_prefix.push_str(&format!(
             "sudo perf record -a -C {} -g -F 99 -o {} ",
-            pin_cores_str, &perf_record_file
+            &pin_cores_str, &perf_record_file
         ));
     }
 
@@ -750,6 +783,20 @@ where
             });
         }
 
+        Workload::PagewalkCoherence { mode } => {
+            time!(timers, "Workload", {
+                run_pagewalk_coherence(
+                    &ushell,
+                    &coherence_dir,
+                    mode,
+                    Some(&cmd_prefix),
+                    &coherence_file,
+                    &runtime_file,
+                    pin_cores[0],
+                )?;
+            });
+        }
+
         Workload::Memcached { .. } => {
             let mut ycsb = ycsb.unwrap();
 
@@ -914,5 +961,40 @@ fn run_gups(
     let duration = Instant::now() - start;
 
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
+    Ok(())
+}
+
+fn run_pagewalk_coherence(
+    ushell: &SshShell,
+    coherence_dir: &str,
+    mode: PagewalkCoherenceMode,
+    cmd_prefix: Option<&str>,
+    coherence_file: &str,
+    runtime_file: &str,
+    pin_core: usize,
+) -> Result<(), failure::Error> {
+    // Building this ubmks requires the kernel to be built, so we build it now
+    // instead of during setup
+    ushell.run(cmd!("make").cwd(coherence_dir))?;
+    ushell.run(cmd!("sudo insmod ./pgmod.ko").cwd(coherence_dir))?;
+
+    let start = Instant::now();
+    ushell.run(
+        cmd!(
+            "sudo taskset -c {} {} ./paging --mode {} | tee {}",
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            match mode {
+                PagewalkCoherenceMode::Speculation => 0,
+                PagewalkCoherenceMode::Coherence => 1,
+            },
+            coherence_file,
+        )
+        .cwd(coherence_dir)
+    )?;
+    let duration = Instant::now() - start;
+
+    ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
+
     Ok(())
 }
