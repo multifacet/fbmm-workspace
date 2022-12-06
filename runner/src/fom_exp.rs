@@ -58,8 +58,16 @@ enum Workload {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum FomFS {
-    Ext4,
-    FOMTierFS,
+    Ext4 {
+        dram_size: usize,
+        dram_start: usize,
+    },
+    FOMTierFS {
+        dram_size: usize,
+        dram_start: usize,
+        pmem_size: usize,
+        pmem_start: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Parametrize)]
@@ -79,8 +87,6 @@ struct Config {
     smaps_periodic: bool,
     lock_stat: bool,
     fom: Option<FomFS>,
-    dram_size: usize,
-    pmem_size: usize,
     migrate_task_int: Option<usize>,
     hugetlb: Option<usize>,
     pte_fault_size: usize,
@@ -187,13 +193,30 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Collect /proc/[PID]/smaps data periodically for the workload process")
         (@arg LOCK_STAT: --lock_stat
          "Collect lock statistics from the workload.")
-        (@arg FOM: --fom +takes_value
-         requires[DRAM_SIZE] conflicts_with[HUGETLB]
+        (@arg FOM: --fom
+         requires[DRAM_SIZE] requires[FOM_TYPE] conflicts_with[HUGETLB]
          "Run the workload with file only memory with the specified FS (either ext4 or FOMTierFS).")
+        (@group FOM_TYPE =>
+            (@attributes requires[FOM])
+            (@arg EXT4: --ext4
+             "Use ext4 as the FOM filesystem.")
+            (@arg FOMTIERFS: --fomtierfs
+             requires[PMEM_SIZE]
+             "Use FOMTierFS as the FOM filesystem.")
+        )
         (@arg DRAM_SIZE: --dram_size +takes_value {validator::is::<usize>}
-         "(Optional) If passed, reserved the specifies amount of memory in GB as DRAM.")
+         requires[FOM]
+         "If passed, reserved the specifies amount of memory in GB as DRAM.")
+        (@arg DRAM_START: --dram_start +takes_value {validator::is::<usize>}
+         requires[FOM]
+         "If passed, specifies the starting point of the reserved DRAM in GB. Default is 4GB")
         (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
-         "(Optional) If passed, reserved the specified amount of memory in GB as PMEM.")
+         requires[FOMTIERFS]
+         "If passed, reserved the specified amount of memory in GB as PMEM.")
+        (@arg PMEM_START: --pmem_start +takes_value {validator::is::<usize>}
+         requires[FOMTIERFS]
+         "If passed, specifies the starting point of the reserved PMEM in GB. \
+         Default is dram_size + dram_start.")
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
          "(Optional) If passed, sets the migration task interval to the specified value.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
@@ -322,25 +345,39 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
     let lock_stat = sub_m.is_present("LOCK_STAT");
-    let fom = sub_m.value_of("FOM").map(|fs| {
-        if fs == "ext4" {
-            FomFS::Ext4
-        } else if fs == "FOMTierFS" {
-            FomFS::FOMTierFS
+    let fom = sub_m.is_present("FOM").then(|| {
+        print!("Hello World!\n");
+        let dram_size = sub_m
+            .value_of("DRAM_SIZE")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        // 4GB seems to be where RAM starts in phys mem in most system
+        let dram_start = sub_m
+            .value_of("DRAM_START")
+            .unwrap_or("4")
+            .parse::<usize>()
+            .unwrap();
+
+        if sub_m.is_present("EXT4") {
+            FomFS::Ext4 { dram_size, dram_start }
+        } else if sub_m.is_present("FOMTIERFS") {
+            let pmem_size = sub_m
+                .value_of("PMEM_SIZE")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            let pmem_start = sub_m
+                .value_of("PMEM_START")
+                .unwrap_or(&(dram_size + dram_start).to_string())
+                .parse::<usize>()
+                .unwrap();
+
+            FomFS::FOMTierFS { dram_size, dram_start, pmem_size, pmem_start }
         } else {
-            panic!("Invalid FOM file system: {fs}");
+            panic!("Invalid FOM file system. Use either --ext4 or --fomtierfs");
         }
     });
-    let dram_size = sub_m
-        .value_of("DRAM_SIZE")
-        .unwrap_or("0")
-        .parse::<usize>()
-        .unwrap();
-    let pmem_size = sub_m
-        .value_of("PMEM_SIZE")
-        .unwrap_or("0")
-        .parse::<usize>()
-        .unwrap();
     let migrate_task_int = sub_m
         .value_of("MIGRATE_TASK_INT")
         .map(|interval| interval.parse::<usize>().unwrap());
@@ -378,8 +415,6 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         smaps_periodic,
         lock_stat,
         fom,
-        dram_size,
-        pmem_size,
         migrate_task_int,
         hugetlb,
         pte_fault_size,
@@ -455,18 +490,18 @@ where
     // Then, if we are doing a pmem experiment, add it in
     if let Some(fs) = &cfg.fom {
         match fs {
-            FomFS::Ext4 => {
+            FomFS::Ext4 { dram_size, dram_start } => {
                 ushell.run(cmd!(
-                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G"/' \
+                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
-                    cfg.dram_size
+                    dram_size, dram_start
                 ))?;
             }
-            FomFS::FOMTierFS => {
+            FomFS::FOMTierFS { dram_size, dram_start, pmem_size, pmem_start } => {
                 ushell.run(cmd!(
-                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!4G memmap={}G!{}G"/' \
+                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
-                    cfg.dram_size, cfg.pmem_size, 4 + cfg.dram_size
+                    dram_size, dram_start, pmem_size, pmem_start
                 ))?;
             }
         }
@@ -587,7 +622,7 @@ where
         ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
 
         match fs {
-            FomFS::Ext4 => {
+            FomFS::Ext4 { .. } => {
                 ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
                 ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
                 if !cfg.ext4_metadata {
@@ -595,7 +630,7 @@ where
                 }
                 ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
             }
-            FomFS::FOMTierFS => {
+            FomFS::FOMTierFS { .. }=> {
                 ushell.run(cmd!(
                     "sudo insmod {}/FOMTierFS/fomtierfs.ko",
                     crate::KERNEL_PATH
@@ -816,7 +851,7 @@ where
     // If we are using FOMTierFS, print some stats
     if let Some(fs) = &cfg.fom {
         match fs {
-            FomFS::FOMTierFS => {
+            FomFS::FOMTierFS { .. } => {
                 ushell.run(cmd!("cat /sys/fs/fomtierfs/stats | tee {}", &fomtierfs_stats_file))?;
             }
             _ => {}
