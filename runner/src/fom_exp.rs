@@ -287,7 +287,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 "xz" => Workload::Spec2017Xz { size },
                 _ => panic!("Unknown spec workload"),
             }
-        },
+        }
 
         ("gups", Some(sub_m)) => {
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
@@ -360,7 +360,10 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             .unwrap();
 
         if sub_m.is_present("EXT4") {
-            FomFS::Ext4 { dram_size, dram_start }
+            FomFS::Ext4 {
+                dram_size,
+                dram_start,
+            }
         } else if sub_m.is_present("FOMTIERFS") {
             let pmem_size = sub_m
                 .value_of("PMEM_SIZE")
@@ -373,7 +376,12 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .parse::<usize>()
                 .unwrap();
 
-            FomFS::FOMTierFS { dram_size, dram_start, pmem_size, pmem_start }
+            FomFS::FOMTierFS {
+                dram_size,
+                dram_start,
+                pmem_size,
+                pmem_start,
+            }
         } else {
             panic!("Invalid FOM file system. Use either --ext4 or --fomtierfs");
         }
@@ -490,14 +498,23 @@ where
     // Then, if we are doing a pmem experiment, add it in
     if let Some(fs) = &cfg.fom {
         match fs {
-            FomFS::Ext4 { dram_size, dram_start } => {
+            FomFS::Ext4 {
+                dram_size,
+                dram_start,
+            } => {
                 ushell.run(cmd!(
                     r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
-                    dram_size, dram_start
+                    dram_size,
+                    dram_start
                 ))?;
             }
-            FomFS::FOMTierFS { dram_size, dram_start, pmem_size, pmem_start } => {
+            FomFS::FOMTierFS {
+                dram_size,
+                dram_start,
+                pmem_size,
+                pmem_start,
+            } => {
                 ushell.run(cmd!(
                     r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
@@ -630,7 +647,7 @@ where
                 }
                 ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
             }
-            FomFS::FOMTierFS { .. }=> {
+            FomFS::FOMTierFS { .. } => {
                 ushell.run(cmd!(
                     "sudo insmod {}/FOMTierFS/fomtierfs.ko",
                     crate::KERNEL_PATH
@@ -641,7 +658,10 @@ where
                 ))?;
 
                 if let Some(interval) = cfg.migrate_task_int {
-                    ushell.run(cmd!("echo {} | sudo tee /sys/fs/fomtierfs/migrate_task_int", interval))?;
+                    ushell.run(cmd!(
+                        "echo {} | sudo tee /sys/fs/fomtierfs/migrate_task_int",
+                        interval
+                    ))?;
                 }
             }
         }
@@ -782,7 +802,9 @@ where
             });
         }
 
-        w @ Workload::Spec2017Mcf | w @ Workload::Spec2017Xz { size: _ } | w @ Workload::Spec2017Xalancbmk => {
+        w @ Workload::Spec2017Mcf
+        | w @ Workload::Spec2017Xz { size: _ }
+        | w @ Workload::Spec2017Xalancbmk => {
             let wkload = match w {
                 Workload::Spec2017Mcf => Spec2017Workload::Mcf,
                 Workload::Spec2017Xz { size } => Spec2017Workload::Xz { size },
@@ -852,7 +874,10 @@ where
     if let Some(fs) = &cfg.fom {
         match fs {
             FomFS::FOMTierFS { .. } => {
-                ushell.run(cmd!("cat /sys/fs/fomtierfs/stats | tee {}", &fomtierfs_stats_file))?;
+                ushell.run(cmd!(
+                    "cat /sys/fs/fomtierfs/stats | tee {}",
+                    &fomtierfs_stats_file
+                ))?;
             }
             _ => {}
         }
@@ -871,7 +896,10 @@ where
 
     // Record the lock statistics if needed
     if cfg.lock_stat {
-        ushell.run(cmd!("sudo cat /proc/lock_stat | sudo tee {}", lock_stat_file))?;
+        ushell.run(cmd!(
+            "sudo cat /proc/lock_stat | sudo tee {}",
+            lock_stat_file
+        ))?;
     }
 
     // Clean up the mm_fault_tracker if it was started
@@ -1028,7 +1056,7 @@ fn run_pagewalk_coherence(
             },
             coherence_file,
         )
-        .cwd(coherence_dir)
+        .cwd(coherence_dir),
     )?;
     let duration = Instant::now() - start;
 
