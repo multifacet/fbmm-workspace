@@ -867,6 +867,9 @@ where
     let ushell = SshShell::with_any_key(login.username, &login.host)?;
     //    spurs_util::reboot(&mut ushell, /* dry_run */ false)?;
     let _ = ushell.run(cmd!("sudo reboot"));
+    // It sometimes takes a few seconds for the reboot to actually happen,
+    // so make sure we wait a bit for it.
+    std::thread::sleep(std::time::Duration::from_secs(5));
 
     // Keep trying to connect until we succeed
     let ushell = {
