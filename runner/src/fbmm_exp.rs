@@ -57,12 +57,12 @@ enum Workload {
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-enum FomFS {
+enum MMFS {
     Ext4 {
         dram_size: usize,
         dram_start: usize,
     },
-    FOMTierFS {
+    TieredMMFS {
         dram_size: usize,
         dram_start: usize,
         pmem_size: usize,
@@ -86,7 +86,7 @@ struct Config {
     flame_graph: bool,
     smaps_periodic: bool,
     lock_stat: bool,
-    fom: Option<FomFS>,
+    fbmm: Option<MMFS>,
     migrate_task_int: Option<usize>,
     hugetlb: Option<usize>,
     pte_fault_size: usize,
@@ -109,8 +109,8 @@ struct Config {
 }
 
 pub fn cli_options() -> clap::App<'static, 'static> {
-    clap_app! { fom_exp =>
-        (about: "Run file only memory experiments. Requires `sudo`.")
+    clap_app! { fbmm_exp =>
+        (about: "Run file based mm experiments. Requires `sudo`.")
         (@setting ArgRequiredElseHelp)
         (@setting DisableVersion)
         (@arg HOSTNAME: +required +takes_value
@@ -193,44 +193,44 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Collect /proc/[PID]/smaps data periodically for the workload process")
         (@arg LOCK_STAT: --lock_stat
          "Collect lock statistics from the workload.")
-        (@arg FOM: --fom
-         requires[DRAM_SIZE] requires[FOM_TYPE] conflicts_with[HUGETLB]
-         "Run the workload with file only memory with the specified FS (either ext4 or FOMTierFS).")
-        (@group FOM_TYPE =>
-            (@attributes requires[FOM])
+        (@arg FBMM: --fbmm
+         requires[DRAM_SIZE] requires[MMFS_TYPE] conflicts_with[HUGETLB]
+         "Run the workload with file based mm with the specified FS (either ext4 or TieredMMFS).")
+        (@group MMFS_TYPE =>
+            (@attributes requires[FBMM])
             (@arg EXT4: --ext4
-             "Use ext4 as the FOM filesystem.")
-            (@arg FOMTIERFS: --fomtierfs
+             "Use ext4 as the MM filesystem.")
+            (@arg TIEREDMMFS: --tieredmmfs
              requires[PMEM_SIZE]
-             "Use FOMTierFS as the FOM filesystem.")
+             "Use TieredMMFS as the MM filesystem.")
         )
         (@arg DRAM_SIZE: --dram_size +takes_value {validator::is::<usize>}
-         requires[FOM]
+         requires[FBMM]
          "If passed, reserved the specifies amount of memory in GB as DRAM.")
         (@arg DRAM_START: --dram_start +takes_value {validator::is::<usize>}
-         requires[FOM]
+         requires[FBMM]
          "If passed, specifies the starting point of the reserved DRAM in GB. Default is 4GB")
         (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
-         requires[FOMTIERFS]
+         requires[TIEREDMMFS]
          "If passed, reserved the specified amount of memory in GB as PMEM.")
         (@arg PMEM_START: --pmem_start +takes_value {validator::is::<usize>}
-         requires[FOMTIERFS]
+         requires[TIEREDMMFS]
          "If passed, specifies the starting point of the reserved PMEM in GB. \
          Default is dram_size + dram_start.")
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
          "(Optional) If passed, sets the migration task interval to the specified value.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
-         conflicts_with[FOM]
+         conflicts_with[FBMM]
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
         (@arg PTE_FAULT_SIZE: --pte_fault_size +takes_value {validator::is::<usize>}
          "The number of pages to allocate on a DAX pte fault.")
         (@arg THP_TEMPORAL_ZERO: --thp_temporal_zero
-         conflicts_with[FOM] conflicts_with[DISABLE_THP]
+         conflicts_with[FBMM] conflicts_with[DISABLE_THP]
          "Tell the kernel to use the standard erms zeroing for huge pages.")
         (@arg NO_FPM_FIX: --no_fpm_fix
          "Tell the kernel to ignore the optimization to the follow_page_mask function for FOM.")
         (@arg NO_PMEM_WRITE_ZEROES: --no_pmem_write_zeroes
-         "Tell the kernels not to zero FOM pages by copying the zero page.")
+         "Tell the kernels not to zero FBMM pages by copying the zero page.")
         (@arg TRACK_PFN_INSERT: --track_pfn_insert
          "Tell the kernel to call the expensive track_pfn_insert function.")
         (@arg MARK_INODE_DIRTY: --mark_inode_dirty
@@ -345,8 +345,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
     let lock_stat = sub_m.is_present("LOCK_STAT");
-    let fom = sub_m.is_present("FOM").then(|| {
-        print!("Hello World!\n");
+    let fbmm = sub_m.is_present("FBMM").then(|| {
         let dram_size = sub_m
             .value_of("DRAM_SIZE")
             .unwrap()
@@ -360,11 +359,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             .unwrap();
 
         if sub_m.is_present("EXT4") {
-            FomFS::Ext4 {
+            MMFS::Ext4 {
                 dram_size,
                 dram_start,
             }
-        } else if sub_m.is_present("FOMTIERFS") {
+        } else if sub_m.is_present("TIEREDMMFS") {
             let pmem_size = sub_m
                 .value_of("PMEM_SIZE")
                 .unwrap()
@@ -376,14 +375,14 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .parse::<usize>()
                 .unwrap();
 
-            FomFS::FOMTierFS {
+            MMFS::TieredMMFS {
                 dram_size,
                 dram_start,
                 pmem_size,
                 pmem_start,
             }
         } else {
-            panic!("Invalid FOM file system. Use either --ext4 or --fomtierfs");
+            panic!("Invalid MM file system. Use either --ext4 or --tieredmmfs");
         }
     });
     let migrate_task_int = sub_m
@@ -422,7 +421,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         flame_graph,
         smaps_periodic,
         lock_stat,
-        fom,
+        fbmm,
         migrate_task_int,
         hugetlb,
         pte_fault_size,
@@ -473,7 +472,7 @@ where
     let alloc_test_file = dir!(&results_dir, cfg.gen_file_name("alloctest"));
     let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
-    let fomtierfs_stats_file = dir!(&results_dir, cfg.gen_file_name("fomtierfs_stats"));
+    let tieredmmfs_stats_file = dir!(&results_dir, cfg.gen_file_name("tieredmmfs_stats"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
@@ -496,9 +495,9 @@ where
         /etc/default/grub | sudo tee /etc/default/grub"#
     ))?;
     // Then, if we are doing a pmem experiment, add it in
-    if let Some(fs) = &cfg.fom {
+    if let Some(fs) = &cfg.fbmm {
         match fs {
-            FomFS::Ext4 {
+            MMFS::Ext4 {
                 dram_size,
                 dram_start,
             } => {
@@ -509,7 +508,7 @@ where
                     dram_start
                 ))?;
             }
-            FomFS::FOMTierFS {
+            MMFS::TieredMMFS {
                 dram_size,
                 dram_start,
                 pmem_size,
@@ -631,7 +630,7 @@ where
         ushell.run(cmd!("echo 0 | sudo tee /proc/lock_stat"))?;
     }
 
-    if let Some(fs) = &cfg.fom {
+    if let Some(fs) = &cfg.fbmm {
         cmd_prefix.push_str(&format!("sudo {}/fom_wrapper ", bmks_dir));
 
         // Set up the remote for FOM
@@ -639,7 +638,7 @@ where
         ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
 
         match fs {
-            FomFS::Ext4 { .. } => {
+            MMFS::Ext4 { .. } => {
                 ushell.run(cmd!("sudo mkfs.ext4 /dev/pmem0"))?;
                 ushell.run(cmd!("sudo tune2fs -O ^has_journal /dev/pmem0"))?;
                 if !cfg.ext4_metadata {
@@ -647,19 +646,19 @@ where
                 }
                 ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
             }
-            FomFS::FOMTierFS { .. } => {
+            MMFS::TieredMMFS { .. } => {
                 ushell.run(cmd!(
-                    "sudo insmod {}/FOMTierFS/fomtierfs.ko",
+                    "sudo insmod {}/TieredMMFS/tieredmmfs.ko",
                     crate::KERNEL_PATH
                 ))?;
                 ushell.run(cmd!(
-                    "sudo mount -t FOMTierFS -o slowmem=/dev/pmem1 -o basepage={} /dev/pmem0 daxtmp/",
+                    "sudo mount -t TieredMMFS -o slowmem=/dev/pmem1 -o basepage={} /dev/pmem0 daxtmp/",
                     cfg.disable_thp
                 ))?;
 
                 if let Some(interval) = cfg.migrate_task_int {
                     ushell.run(cmd!(
-                        "echo {} | sudo tee /sys/fs/fomtierfs/migrate_task_int",
+                        "echo {} | sudo tee /sys/fs/tieredmmfs/migrate_task_int",
                         interval
                     ))?;
                 }
@@ -667,46 +666,46 @@ where
         }
 
         ushell.run(cmd!(
-            "echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fom/file_dir",
+            "echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fbmm/file_dir",
             &user_home
         ))?;
-        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fom/state"))?;
+        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fbmm/state"))?;
     }
 
     ushell.run(cmd!(
-        "echo {} | sudo tee /sys/kernel/mm/fom/pte_fault_size",
+        "echo {} | sudo tee /sys/kernel/mm/fbmm/pte_fault_size",
         cfg.pte_fault_size
     ))?;
 
     // Handle disabling optimizations if requested
     if cfg.thp_temporal_zero {
         ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fom/nt_huge_page_zero"
+            "echo 0 | sudo tee /sys/kernel/mm/fbmm/nt_huge_page_zero"
         ))?;
     }
     if cfg.no_fpm_fix {
         ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fom/follow_page_mask_fix"
+            "echo 0 | sudo tee /sys/kernel/mm/fbmm/follow_page_mask_fix"
         ))?;
     }
     if cfg.no_pmem_write_zeroes {
         ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fom/pmem_write_zeroes"
+            "echo 0 | sudo tee /sys/kernel/mm/fbmm/pmem_write_zeroes"
         ))?;
     }
     if cfg.track_pfn_insert {
         ushell.run(cmd!(
-            "echo 1 | sudo tee /sys/kernel/mm/fom/track_pfn_insert"
+            "echo 1 | sudo tee /sys/kernel/mm/fbmm/track_pfn_insert"
         ))?;
     }
     if cfg.mark_inode_dirty {
         ushell.run(cmd!(
-            "echo 1 | sudo tee /sys/kernel/mm/fom/mark_inode_dirty"
+            "echo 1 | sudo tee /sys/kernel/mm/fbmm/mark_inode_dirty"
         ))?;
     }
     if cfg.no_prealloc {
         ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fom/prealloc_map_populate"
+            "echo 0 | sudo tee /sys/kernel/mm/fbmm/prealloc_map_populate"
         ))?;
     }
 
@@ -870,13 +869,13 @@ where
         }
     }
 
-    // If we are using FOMTierFS, print some stats
-    if let Some(fs) = &cfg.fom {
+    // If we are using TieredMMFS, print some stats
+    if let Some(fs) = &cfg.fbmm {
         match fs {
-            FomFS::FOMTierFS { .. } => {
+            MMFS::TieredMMFS { .. } => {
                 ushell.run(cmd!(
-                    "cat /sys/fs/fomtierfs/stats | tee {}",
-                    &fomtierfs_stats_file
+                    "cat /sys/fs/tieredmmfs/stats | tee {}",
+                    &tieredmmfs_stats_file
                 ))?;
             }
             _ => {}

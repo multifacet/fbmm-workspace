@@ -1,4 +1,4 @@
-mod fom_exp;
+mod fbmm_exp;
 mod setup_kernel;
 mod setup_wkspc;
 
@@ -19,7 +19,7 @@ fn run() -> Result<(), failure::Error> {
         )
         .subcommand(crate::setup_wkspc::cli_options())
         .subcommand(crate::setup_kernel::cli_options())
-        .subcommand(crate::fom_exp::cli_options())
+        .subcommand(crate::fbmm_exp::cli_options())
         .setting(clap::AppSettings::SubcommandRequiredElseHelp)
         .setting(clap::AppSettings::DisableVersion)
         .get_matches();
@@ -27,7 +27,7 @@ fn run() -> Result<(), failure::Error> {
     match matches.subcommand() {
         ("setup_wkspc", Some(sub_m)) => crate::setup_wkspc::run(sub_m),
         ("setup_kernel", Some(sub_m)) => crate::setup_kernel::run(sub_m),
-        ("fom_exp", Some(sub_m)) => crate::fom_exp::run(sub_m),
+        ("fbmm_exp", Some(sub_m)) => crate::fbmm_exp::run(sub_m),
         _ => {
             unreachable!();
         }
