@@ -631,7 +631,7 @@ where
     }
 
     if let Some(fs) = &cfg.fbmm {
-        cmd_prefix.push_str(&format!("sudo {}/fom_wrapper ", bmks_dir));
+        cmd_prefix.push_str(&format!("sudo {}/fbmm_wrapper \"{}/daxtmp/\"", bmks_dir, user_home));
 
         // Set up the remote for FOM
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
@@ -665,10 +665,6 @@ where
             }
         }
 
-        ushell.run(cmd!(
-            "echo \"{}/daxtmp/\" | sudo tee /sys/kernel/mm/fbmm/file_dir",
-            &user_home
-        ))?;
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fbmm/state"))?;
     }
 
