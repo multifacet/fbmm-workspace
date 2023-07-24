@@ -32,8 +32,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@arg INSTALL_PERF: --install_perf
          "(Optional) Install the perf corresponding to this kernel")
-        (@arg TIEREDMMFS: --tieredmmfs
-         "(Optional) Build the tieredmmfs kernel module")
+        (@arg BIULD_MMFS: --build_mmfs
+         "(Optional) Build the in tree MMFS modules")
     }
 }
 
@@ -49,7 +49,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let git_user = sub_m.value_of("GIT_USER").unwrap();
     let secret = sub_m.value_of("SECRET");
     let install_perf = sub_m.is_present("INSTALL_PERF");
-    let tieredmmfs = sub_m.is_present("TIEREDMMFS");
+    let build_mmfs = sub_m.is_present("BUILD_MMFS");
 
     let git_repo = if let Some(_secret) = &secret {
         GitRepo::HttpsPrivate {
@@ -116,7 +116,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     ushell.run(cmd!("sudo dpkg -i {} {}", kernel_deb, kernel_headers_deb).cwd(&kernel_path))?;
     ushell.run(cmd!("sudo grub-set-default 0"))?;
 
-    if tieredmmfs {
+    if build_mmfs {
         let tieredmmfs_dir = dir!(&kernel_path, "TieredMMFS/");
         ushell.run(cmd!("make").cwd(tieredmmfs_dir))?;
     }
