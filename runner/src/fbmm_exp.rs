@@ -57,16 +57,19 @@ enum Workload {
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+struct MemRegion {
+    size: usize,
+    start: usize,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum MMFS {
     Ext4 {
-        dram_size: usize,
-        dram_start: usize,
+        dram: MemRegion,
     },
     TieredMMFS {
-        dram_size: usize,
-        dram_start: usize,
-        pmem_size: usize,
-        pmem_start: usize,
+        dram: MemRegion,
+        pmem: MemRegion,
     },
 }
 
@@ -87,6 +90,7 @@ struct Config {
     smaps_periodic: bool,
     lock_stat: bool,
     fbmm: Option<MMFS>,
+    tpp: Option<MemRegion>,
     migrate_task_int: Option<usize>,
     hugetlb: Option<usize>,
     pte_fault_size: usize,
@@ -194,8 +198,11 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg LOCK_STAT: --lock_stat
          "Collect lock statistics from the workload.")
         (@arg FBMM: --fbmm
-         requires[DRAM_SIZE] requires[MMFS_TYPE] conflicts_with[HUGETLB]
+         requires[DRAM_SIZE] requires[MMFS_TYPE] conflicts_with[TPP] conflicts_with[HUGETLB]
          "Run the workload with file based mm with the specified FS (either ext4 or TieredMMFS).")
+        (@arg TPP: --tpp
+         requires[DRAM_SIZE] conflicts_with[FBMM] conflicts_with[HUGETLB]
+         "Run the workload with TPP.")
         (@group MMFS_TYPE =>
             (@attributes requires[FBMM])
             (@arg EXT4: --ext4
@@ -205,10 +212,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
              "Use TieredMMFS as the MM filesystem.")
         )
         (@arg DRAM_SIZE: --dram_size +takes_value {validator::is::<usize>}
-         requires[FBMM]
          "If passed, reserved the specifies amount of memory in GB as DRAM.")
         (@arg DRAM_START: --dram_start +takes_value {validator::is::<usize>}
-         requires[FBMM]
          "If passed, specifies the starting point of the reserved DRAM in GB. Default is 4GB")
         (@arg PMEM_SIZE: --pmem_size +takes_value {validator::is::<usize>}
          requires[TIEREDMMFS]
@@ -220,7 +225,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
          "(Optional) If passed, sets the migration task interval to the specified value.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
-         conflicts_with[FBMM]
+         conflicts_with[FBMM] conflicts_with[TPP]
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
         (@arg PTE_FAULT_SIZE: --pte_fault_size +takes_value {validator::is::<usize>}
          "The number of pages to allocate on a DAX pte fault.")
@@ -360,8 +365,10 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         if sub_m.is_present("EXT4") {
             MMFS::Ext4 {
-                dram_size,
-                dram_start,
+                dram: MemRegion {
+                    size: dram_size,
+                    start: dram_start,
+                }
             }
         } else if sub_m.is_present("TIEREDMMFS") {
             let pmem_size = sub_m
@@ -376,13 +383,35 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .unwrap();
 
             MMFS::TieredMMFS {
-                dram_size,
-                dram_start,
-                pmem_size,
-                pmem_start,
+                dram: MemRegion {
+                    size: dram_size,
+                    start: dram_start,
+                },
+                pmem: MemRegion {
+                    size: pmem_size,
+                    start: pmem_start,
+                },
             }
         } else {
             panic!("Invalid MM file system. Use either --ext4 or --tieredmmfs");
+        }
+    });
+    let tpp = sub_m.is_present("TPP").then(|| {
+        let dram_size = sub_m
+            .value_of("DRAM_SIZE")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        // 4GB seems to be where RAM starts in phys mem in most system
+        let dram_start = sub_m
+            .value_of("DRAM_START")
+            .unwrap_or("4")
+            .parse::<usize>()
+            .unwrap();
+
+        MemRegion {
+            size: dram_size,
+            start: dram_start,
         }
     });
     let migrate_task_int = sub_m
@@ -422,6 +451,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         smaps_periodic,
         lock_stat,
         fbmm,
+        tpp,
         migrate_task_int,
         hugetlb,
         pte_fault_size,
@@ -498,30 +528,37 @@ where
     if let Some(fs) = &cfg.fbmm {
         match fs {
             MMFS::Ext4 {
-                dram_size,
-                dram_start,
+                dram
             } => {
                 ushell.run(cmd!(
                     r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
-                    dram_size,
-                    dram_start
+                    dram.size,
+                    dram.start
                 ))?;
             }
             MMFS::TieredMMFS {
-                dram_size,
-                dram_start,
-                pmem_size,
-                pmem_start,
+                dram,
+                pmem,
             } => {
                 ushell.run(cmd!(
                     r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G memmap={}G!{}G"/' \
                     /etc/default/grub | sudo tee /etc/default/grub"#,
-                    dram_size, dram_start, pmem_size, pmem_start
+                    dram.size, dram.start, pmem.size, pmem.start
                 ))?;
             }
         }
     }
+    // Same, but for TPP
+    if let Some(dram) = &cfg.tpp {
+        ushell.run(cmd!(
+            r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
+            /etc/default/grub | sudo tee /etc/default/grub"#,
+            dram.size,
+            dram.start
+        ))?;
+    }
+
     // Finally, update the grub config
     ushell.run(cmd!("sudo update-grub2"))?;
 
@@ -666,6 +703,11 @@ where
         }
 
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fbmm/state"))?;
+    }
+
+    if cfg.tpp.is_some() {
+        // Set the NUMA policy to TPP
+        ushell.run(cmd!("sudo sysctl kernel.numa_balancing=2"))?;
     }
 
     ushell.run(cmd!(
