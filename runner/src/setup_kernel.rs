@@ -32,7 +32,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@arg INSTALL_PERF: --install_perf
          "(Optional) Install the perf corresponding to this kernel")
-        (@arg BIULD_MMFS: --build_mmfs
+        (@arg BUILD_MMFS: --build_mmfs
          "(Optional) Build the in tree MMFS modules")
     }
 }
