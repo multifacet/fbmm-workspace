@@ -708,43 +708,44 @@ where
     if cfg.tpp.is_some() {
         // Set the NUMA policy to TPP
         ushell.run(cmd!("sudo sysctl kernel.numa_balancing=2"))?;
-    }
+    } else {
+        // These options are not in the TPP kernel
+        ushell.run(cmd!(
+            "echo {} | sudo tee /sys/kernel/mm/fbmm/pte_fault_size",
+            cfg.pte_fault_size
+        ))?;
 
-    ushell.run(cmd!(
-        "echo {} | sudo tee /sys/kernel/mm/fbmm/pte_fault_size",
-        cfg.pte_fault_size
-    ))?;
-
-    // Handle disabling optimizations if requested
-    if cfg.thp_temporal_zero {
-        ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fbmm/nt_huge_page_zero"
-        ))?;
-    }
-    if cfg.no_fpm_fix {
-        ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fbmm/follow_page_mask_fix"
-        ))?;
-    }
-    if cfg.no_pmem_write_zeroes {
-        ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fbmm/pmem_write_zeroes"
-        ))?;
-    }
-    if cfg.track_pfn_insert {
-        ushell.run(cmd!(
-            "echo 1 | sudo tee /sys/kernel/mm/fbmm/track_pfn_insert"
-        ))?;
-    }
-    if cfg.mark_inode_dirty {
-        ushell.run(cmd!(
-            "echo 1 | sudo tee /sys/kernel/mm/fbmm/mark_inode_dirty"
-        ))?;
-    }
-    if cfg.no_prealloc {
-        ushell.run(cmd!(
-            "echo 0 | sudo tee /sys/kernel/mm/fbmm/prealloc_map_populate"
-        ))?;
+        // Handle disabling optimizations if requested
+        if cfg.thp_temporal_zero {
+            ushell.run(cmd!(
+                "echo 0 | sudo tee /sys/kernel/mm/fbmm/nt_huge_page_zero"
+            ))?;
+        }
+        if cfg.no_fpm_fix {
+            ushell.run(cmd!(
+                "echo 0 | sudo tee /sys/kernel/mm/fbmm/follow_page_mask_fix"
+            ))?;
+        }
+        if cfg.no_pmem_write_zeroes {
+            ushell.run(cmd!(
+                "echo 0 | sudo tee /sys/kernel/mm/fbmm/pmem_write_zeroes"
+            ))?;
+        }
+        if cfg.track_pfn_insert {
+            ushell.run(cmd!(
+                "echo 1 | sudo tee /sys/kernel/mm/fbmm/track_pfn_insert"
+            ))?;
+        }
+        if cfg.mark_inode_dirty {
+            ushell.run(cmd!(
+                "echo 1 | sudo tee /sys/kernel/mm/fbmm/mark_inode_dirty"
+            ))?;
+        }
+        if cfg.no_prealloc {
+            ushell.run(cmd!(
+                "echo 0 | sudo tee /sys/kernel/mm/fbmm/prealloc_map_populate"
+            ))?;
+        }
     }
 
     let ycsb = if let Workload::Memcached {
