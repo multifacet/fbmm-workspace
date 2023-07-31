@@ -64,13 +64,8 @@ struct MemRegion {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum MMFS {
-    Ext4 {
-        dram: MemRegion,
-    },
-    TieredMMFS {
-        dram: MemRegion,
-        pmem: MemRegion,
-    },
+    Ext4,
+    TieredMMFS,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Parametrize)]
@@ -90,10 +85,12 @@ struct Config {
     smaps_periodic: bool,
     lock_stat: bool,
     fbmm: Option<MMFS>,
-    tpp: Option<MemRegion>,
+    tpp: bool,
+    dram_region: Option<MemRegion>,
+    pmem_region: Option<MemRegion>,
     migrate_task_int: Option<usize>,
     hugetlb: Option<usize>,
-    pte_fault_size: usize,
+    pte_fault_size: Option<usize>,
 
     thp_temporal_zero: bool,
     no_fpm_fix: bool,
@@ -351,52 +348,16 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
     let lock_stat = sub_m.is_present("LOCK_STAT");
     let fbmm = sub_m.is_present("FBMM").then(|| {
-        let dram_size = sub_m
-            .value_of("DRAM_SIZE")
-            .unwrap()
-            .parse::<usize>()
-            .unwrap();
-        // 4GB seems to be where RAM starts in phys mem in most system
-        let dram_start = sub_m
-            .value_of("DRAM_START")
-            .unwrap_or("4")
-            .parse::<usize>()
-            .unwrap();
-
         if sub_m.is_present("EXT4") {
-            MMFS::Ext4 {
-                dram: MemRegion {
-                    size: dram_size,
-                    start: dram_start,
-                }
-            }
+            MMFS::Ext4
         } else if sub_m.is_present("TIEREDMMFS") {
-            let pmem_size = sub_m
-                .value_of("PMEM_SIZE")
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            let pmem_start = sub_m
-                .value_of("PMEM_START")
-                .unwrap_or(&(dram_size + dram_start).to_string())
-                .parse::<usize>()
-                .unwrap();
-
-            MMFS::TieredMMFS {
-                dram: MemRegion {
-                    size: dram_size,
-                    start: dram_start,
-                },
-                pmem: MemRegion {
-                    size: pmem_size,
-                    start: pmem_start,
-                },
-            }
+            MMFS::TieredMMFS
         } else {
             panic!("Invalid MM file system. Use either --ext4 or --tieredmmfs");
         }
     });
-    let tpp = sub_m.is_present("TPP").then(|| {
+    let tpp = sub_m.is_present("TPP");
+    let dram_region = sub_m.is_present("DRAM_SIZE").then(|| {
         let dram_size = sub_m
             .value_of("DRAM_SIZE")
             .unwrap()
@@ -414,6 +375,23 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             start: dram_start,
         }
     });
+    let pmem_region = sub_m.is_present("PMEM_SIZE").then(|| {
+        let pmem_size = sub_m
+            .value_of("PMEM_SIZE")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        let pmem_start = sub_m
+            .value_of("PMEM_START")
+            .unwrap_or(&(dram_region.unwrap().size + dram_region.unwrap().start).to_string())
+            .parse::<usize>()
+            .unwrap();
+
+        MemRegion {
+            size: pmem_size,
+            start: pmem_start,
+        }
+    });
     let migrate_task_int = sub_m
         .value_of("MIGRATE_TASK_INT")
         .map(|interval| interval.parse::<usize>().unwrap());
@@ -422,9 +400,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         .map(|huge_size| huge_size.parse::<usize>().unwrap());
     let pte_fault_size = sub_m
         .value_of("PTE_FAULT_SIZE")
-        .unwrap_or("1")
-        .parse::<usize>()
-        .unwrap();
+        .map(|v| v.parse::<usize>().unwrap());
     let thp_temporal_zero = sub_m.is_present("THP_TEMPORAL_ZERO");
     let no_fpm_fix = sub_m.is_present("NO_FPM_FIX");
     let no_pmem_write_zeroes = sub_m.is_present("NO_PMEM_WRITE_ZEROES");
@@ -452,6 +428,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         lock_stat,
         fbmm,
         tpp,
+        dram_region,
+        pmem_region,
         migrate_task_int,
         hugetlb,
         pte_fault_size,
@@ -524,39 +502,22 @@ where
         r#"sed 's/ memmap=[0-9]*[KMG]![0-9]*[KMG]//g' \
         /etc/default/grub | sudo tee /etc/default/grub"#
     ))?;
-    // Then, if we are doing a pmem experiment, add it in
-    if let Some(fs) = &cfg.fbmm {
-        match fs {
-            MMFS::Ext4 {
-                dram
-            } => {
-                ushell.run(cmd!(
-                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
-                    /etc/default/grub | sudo tee /etc/default/grub"#,
-                    dram.size,
-                    dram.start
-                ))?;
-            }
-            MMFS::TieredMMFS {
-                dram,
-                pmem,
-            } => {
-                ushell.run(cmd!(
-                    r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G memmap={}G!{}G"/' \
-                    /etc/default/grub | sudo tee /etc/default/grub"#,
-                    dram.size, dram.start, pmem.size, pmem.start
-                ))?;
-            }
+    // Then, if we are doing an experiment where we reserve RAM, add it in
+    if let Some(dram) = &cfg.dram_region {
+        if let Some(pmem) = &cfg.pmem_region {
+            ushell.run(cmd!(
+                r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G memmap={}G!{}G"/' \
+                /etc/default/grub | sudo tee /etc/default/grub"#,
+                dram.size, dram.start, pmem.size, pmem.start
+            ))?;
+        } else {
+            ushell.run(cmd!(
+                r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
+                /etc/default/grub | sudo tee /etc/default/grub"#,
+                dram.size,
+                dram.start
+            ))?;
         }
-    }
-    // Same, but for TPP
-    if let Some(dram) = &cfg.tpp {
-        ushell.run(cmd!(
-            r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
-            /etc/default/grub | sudo tee /etc/default/grub"#,
-            dram.size,
-            dram.start
-        ))?;
     }
 
     // Finally, update the grub config
@@ -705,15 +666,17 @@ where
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fbmm/state"))?;
     }
 
-    if cfg.tpp.is_some() {
+    if cfg.tpp {
         // Set the NUMA policy to TPP
         ushell.run(cmd!("sudo sysctl kernel.numa_balancing=2"))?;
     } else {
         // These options are not in the TPP kernel
-        ushell.run(cmd!(
-            "echo {} | sudo tee /sys/kernel/mm/fbmm/pte_fault_size",
-            cfg.pte_fault_size
-        ))?;
+        if let Some(fault_size) = &cfg.pte_fault_size {
+            ushell.run(cmd!(
+                "echo {} | sudo tee /sys/kernel/mm/fbmm/pte_fault_size",
+                fault_size
+            ))?;
+        }
 
         // Handle disabling optimizations if requested
         if cfg.thp_temporal_zero {
