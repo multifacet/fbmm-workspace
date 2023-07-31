@@ -629,7 +629,10 @@ where
     }
 
     if let Some(fs) = &cfg.fbmm {
-        cmd_prefix.push_str(&format!("sudo {}/fbmm_wrapper \"{}/daxtmp/\"", bmks_dir, user_home));
+        cmd_prefix.push_str(&format!(
+            "sudo {}/fbmm_wrapper \"{}/daxtmp/\"",
+            bmks_dir, user_home
+        ));
 
         // Set up the remote for FOM
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
