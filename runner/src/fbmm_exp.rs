@@ -724,6 +724,10 @@ where
         update_prop,
     } = cfg.workload
     {
+        // Empirically, this is the amount of bytes a single record takes
+        const RECORD_SIZE: usize = 1350;
+        // "size" is the size in GB on the cache, so take off a GB to add some wiggle room
+        let record_count = ((size - 1) << 30) / RECORD_SIZE;
         let memcached_cfg = MemcachedWorkloadConfig {
             user: &login.username,
             memcached: &memcached_dir,
@@ -741,7 +745,7 @@ where
         };
         let ycsb_cfg = YcsbConfig {
             workload: YcsbWorkload::Custom {
-                record_count: op_count,
+                record_count,
                 op_count,
                 distribution: YcsbDistribution::Uniform,
                 read_prop,
