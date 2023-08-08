@@ -500,23 +500,26 @@ where
     ushell.run(cmd!("cat /etc/default/grub"))?;
     ushell.run(cmd!(
         r#"sed 's/ memmap=[0-9]*[KMG]![0-9]*[KMG]//g' \
-        /etc/default/grub | sudo tee /etc/default/grub"#
+        /etc/default/grub | sudo tee /tmp/grub"#
     ))?;
+    ushell.run(cmd!("sudo mv /tmp/grub /etc/default/grub"))?;
     // Then, if we are doing an experiment where we reserve RAM, add it in
     if let Some(dram) = &cfg.dram_region {
         if let Some(pmem) = &cfg.pmem_region {
             ushell.run(cmd!(
                 r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G memmap={}G!{}G"/' \
-                /etc/default/grub | sudo tee /etc/default/grub"#,
+                /etc/default/grub | sudo tee /tmp/grub"#,
                 dram.size, dram.start, pmem.size, pmem.start
             ))?;
+            ushell.run(cmd!("sudo mv /tmp/grub /etc/default/grub"))?;
         } else {
             ushell.run(cmd!(
                 r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 memmap={}G!{}G"/' \
-                /etc/default/grub | sudo tee /etc/default/grub"#,
+                /etc/default/grub | sudo tee /tmp/grub"#,
                 dram.size,
                 dram.start
             ))?;
+            ushell.run(cmd!("sudo mv /tmp/grub /etc/default/grub"))?;
         }
     }
 
