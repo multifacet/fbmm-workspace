@@ -20,6 +20,19 @@
 
 #define INDEX_FILE "logs/indices.txt"
 
+double elapsed(struct timeval *start, struct timeval *end)
+{
+    struct timeval d;
+    d.tv_sec = end->tv_sec - start->tv_sec;
+    d.tv_usec = end->tv_usec - start->tv_usec;
+    if (d.tv_usec < 0) {
+        d.tv_sec -= 1;
+        d.tv_usec += 1000000;
+    }
+
+    return (d.tv_sec + (d.tv_usec / 1000000.0));
+}
+
 //#define ZIPFIAN
 #define HOTSPOT
 //#define UNIFORM_RANDOM
