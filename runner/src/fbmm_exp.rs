@@ -747,7 +747,7 @@ where
             workload: YcsbWorkload::Custom {
                 record_count,
                 op_count,
-                distribution: YcsbDistribution::Uniform,
+                distribution: YcsbDistribution::Zipfian,
                 read_prop,
                 update_prop,
                 insert_prop: 1.0 - read_prop - update_prop,
