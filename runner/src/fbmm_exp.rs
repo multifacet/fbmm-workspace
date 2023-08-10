@@ -43,6 +43,7 @@ enum Workload {
     },
     Gups {
         exp: usize,
+        hot_exp: Option<usize>,
         num_updates: usize,
     },
     PagewalkCoherence {
@@ -149,6 +150,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (about: "Run the GUPS workload used to eval HeMem")
             (@arg EXP: +required +takes_value {validator::is::<usize>}
              "The log of the size of the workload.")
+            (@arg HOT_EXP: +takes_value {validator::is::<usize>}
+             "The log of the size of the hot region, if there is one")
             (@arg NUM_UPDATES: +takes_value {validator::is::<usize>}
              "The number of updates to do. Default is 2^exp / 8")
         )
@@ -293,12 +296,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         ("gups", Some(sub_m)) => {
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
+            let hot_exp = sub_m.value_of("HOT_EXP").map(|v| v.parse::<usize>().unwrap());
             let num_updates = if let Some(updates_str) = sub_m.value_of("NUM_UPDATES") {
                 updates_str.parse::<usize>().unwrap()
             } else {
                 (1 << exp) / 8
             };
-            Workload::Gups { exp, num_updates }
+            Workload::Gups { exp, hot_exp, num_updates }
         }
 
         ("pagewalk_coherence", Some(sub_m)) => {
@@ -836,12 +840,13 @@ where
             });
         }
 
-        Workload::Gups { exp, num_updates } => {
+        Workload::Gups { exp, hot_exp, num_updates } => {
             time!(timers, "Workload", {
                 run_gups(
                     &ushell,
                     &gups_dir,
                     exp,
+                    hot_exp,
                     num_updates,
                     Some(&cmd_prefix),
                     &gups_file,
@@ -1017,6 +1022,7 @@ fn run_gups(
     ushell: &SshShell,
     gups_dir: &str,
     exp: usize,
+    hot_exp: Option<usize>,
     num_updates: usize,
     cmd_prefix: Option<&str>,
     gups_file: &str,
@@ -1024,17 +1030,33 @@ fn run_gups(
     pin_core: usize,
 ) -> Result<(), failure::Error> {
     let start = Instant::now();
-    ushell.run(
-        cmd!(
-            "sudo taskset -c {} {} ./gups 1 {} {} 8 | tee {}",
-            pin_core,
-            cmd_prefix.unwrap_or(""),
-            num_updates,
-            exp,
-            gups_file,
-        )
-        .cwd(gups_dir),
-    )?;
+
+    if let Some(hot_exp) = hot_exp {
+        ushell.run(
+            cmd!(
+                "sudo taskset -c {} {} ./gups-hotset-move 1 {} {} 8 {} | tee {}",
+                pin_core,
+                cmd_prefix.unwrap_or(""),
+                num_updates,
+                exp,
+                hot_exp,
+                gups_file,
+            )
+            .cwd(gups_dir),
+        )?;
+    } else {
+        ushell.run(
+            cmd!(
+                "sudo taskset -c {} {} ./gups 1 {} {} 8 | tee {}",
+                pin_core,
+                cmd_prefix.unwrap_or(""),
+                num_updates,
+                exp,
+                gups_file,
+            )
+            .cwd(gups_dir),
+        )?;
+    }
     let duration = Instant::now() - start;
 
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
