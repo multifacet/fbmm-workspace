@@ -7,7 +7,7 @@ use libscail::{
     set_kernel_printk_level, time, validator,
     workloads::{
         gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig,
-        Spec2017Workload, TasksetCtx, YcsbConfig, YcsbDistribution, YcsbSession, YcsbSystem,
+        Spec2017Workload, TasksetCtxBuilder, TasksetCtxInterleaving, YcsbConfig, YcsbDistribution, YcsbSession, YcsbSystem,
         YcsbWorkload,
     },
     Login,
@@ -466,9 +466,6 @@ where
     let ushell = SshShell::with_any_key(login.username, &login.host)?;
     let user_home = get_user_home_dir(&ushell)?;
 
-    let cores = libscail::get_num_cores(&ushell)?;
-    let mut tctx = TasksetCtx::new(cores);
-
     // Setup the output file name
     let results_dir = dir!(&user_home, crate::RESULTS_PATH);
 
@@ -586,13 +583,31 @@ where
         libscail::enable_aslr(&ushell)?;
     }
 
-    // Figure out which cores we will use for the workload
-    let pin_cores = match &cfg.workload {
-        Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => {
-            vec![tctx.next(), tctx.next(), tctx.next(), tctx.next()]
+    let mut tctx = match &cfg.workload {
+        Workload::Memcached { .. } => {
+            // We want to place the server and ycsb on different numa nodes
+            TasksetCtxBuilder::from_lscpu(&ushell)?.numa_interleaving(TasksetCtxInterleaving::RoundRobin).build()
+        },
+        _ => {
+            let cores = libscail::get_num_cores(&ushell)?;
+            TasksetCtxBuilder::simple(cores).build()
         }
-        _ => vec![tctx.next()],
     };
+
+    // Figure out which cores we will use for the workload
+    let num_pin_cores = match &cfg.workload {
+        Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
+        Workload::Memcached { .. } => 2,
+        _ => 1,
+    };
+    let mut pin_cores = Vec::<usize>::new();
+    for _ in 0..num_pin_cores {
+        if let Ok(new_core) = tctx.next() {
+            pin_cores.push(new_core);
+        } else {
+            return Err(std::fmt::Error.into());
+        }
+    }
 
     let pin_cores_str = pin_cores
         .iter()
@@ -745,7 +760,6 @@ where
             allow_oom: true,
             hugepages: !cfg.disable_thp,
             server_pin_core: Some(pin_cores[0]),
-            client_pin_core: 0,
         };
         let ycsb_cfg = YcsbConfig {
             workload: YcsbWorkload::Custom {
@@ -757,6 +771,7 @@ where
                 insert_prop: 1.0 - read_prop - update_prop,
             },
             system: YcsbSystem::Memcached(memcached_cfg),
+            client_pin_core: Some(pin_cores[1]),
             ycsb_path: &ycsb_dir,
             ycsb_result_file: Some(&ycsb_file),
         };
