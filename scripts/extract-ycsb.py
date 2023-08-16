@@ -26,6 +26,15 @@ if using_base_kernel:
     experiment_type += " Base "
     experiment_type += " Split" if did_reserve_mem else " Local"
 
+# Sort is used to group things in google sheets.
+# The values are arbitrary based on how I wanted things ordered.
+# The code for this is a little hacky, but whatever
+sort = 5 if kernel_type == "TPP" else 2
+if using_base_kernel:
+    sort = sort - 1
+    if not did_reserve_mem:
+        sort = sort - 1
+
 # Parse the YCSB file for the results
 runtime = None
 throughput = None
@@ -47,6 +56,7 @@ for line in open(filename, "r"):
         latency = value
 
 outdata = {
+    "Sort": str(sort),
     "Type": experiment_type,
     "Runtime": runtime,
     "Throughput": throughput,
