@@ -7,8 +7,8 @@ use libscail::{
     set_kernel_printk_level, time, validator,
     workloads::{
         gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig,
-        Spec2017Workload, TasksetCtxBuilder, TasksetCtxInterleaving, YcsbConfig, YcsbDistribution, YcsbSession, YcsbSystem,
-        YcsbWorkload,
+        Spec2017Workload, TasksetCtxBuilder, TasksetCtxInterleaving, YcsbConfig, YcsbDistribution,
+        YcsbSession, YcsbSystem, YcsbWorkload,
     },
     Login,
 };
@@ -296,13 +296,19 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         ("gups", Some(sub_m)) => {
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
-            let hot_exp = sub_m.value_of("HOT_EXP").map(|v| v.parse::<usize>().unwrap());
+            let hot_exp = sub_m
+                .value_of("HOT_EXP")
+                .map(|v| v.parse::<usize>().unwrap());
             let num_updates = if let Some(updates_str) = sub_m.value_of("NUM_UPDATES") {
                 updates_str.parse::<usize>().unwrap()
             } else {
                 (1 << exp) / 8
             };
-            Workload::Gups { exp, hot_exp, num_updates }
+            Workload::Gups {
+                exp,
+                hot_exp,
+                num_updates,
+            }
         }
 
         ("pagewalk_coherence", Some(sub_m)) => {
@@ -586,8 +592,10 @@ where
     let mut tctx = match &cfg.workload {
         Workload::Memcached { .. } => {
             // We want to place the server and ycsb on different numa nodes
-            TasksetCtxBuilder::from_lscpu(&ushell)?.numa_interleaving(TasksetCtxInterleaving::RoundRobin).build()
-        },
+            TasksetCtxBuilder::from_lscpu(&ushell)?
+                .numa_interleaving(TasksetCtxInterleaving::RoundRobin)
+                .build()
+        }
         _ => {
             let cores = libscail::get_num_cores(&ushell)?;
             TasksetCtxBuilder::simple(cores).build()
@@ -855,7 +863,11 @@ where
             });
         }
 
-        Workload::Gups { exp, hot_exp, num_updates } => {
+        Workload::Gups {
+            exp,
+            hot_exp,
+            num_updates,
+        } => {
             time!(timers, "Workload", {
                 run_gups(
                     &ushell,
