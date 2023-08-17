@@ -89,6 +89,7 @@ struct Config {
     tpp: bool,
     dram_region: Option<MemRegion>,
     pmem_region: Option<MemRegion>,
+    numactl: bool,
     migrate_task_int: Option<usize>,
     hugetlb: Option<usize>,
     pte_fault_size: Option<usize>,
@@ -195,6 +196,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Generate a flame graph of the workload.")
         (@arg SMAPS_PERIODIC: --smaps_periodic
          "Collect /proc/[PID]/smaps data periodically for the workload process")
+        (@arg NUMACTL: --numactl
+         "If passed, use numactl to make sure the workload only allocates from numa node 0.")
         (@arg LOCK_STAT: --lock_stat
          "Collect lock statistics from the workload.")
         (@arg FBMM: --fbmm
@@ -356,6 +359,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
+    let numactl = sub_m.is_present("NUMACTL");
     let lock_stat = sub_m.is_present("LOCK_STAT");
     let fbmm = sub_m.is_present("FBMM").then(|| {
         if sub_m.is_present("EXT4") {
@@ -435,6 +439,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         mm_fault_tracker,
         flame_graph,
         smaps_periodic,
+        numactl,
         lock_stat,
         fbmm,
         tpp,
@@ -649,6 +654,10 @@ where
             ),
             ensure_started: smaps_file,
         })?;
+    }
+
+    if cfg.numactl {
+        cmd_prefix.push_str("numactl --membind=0 ");
     }
 
     if cfg.lock_stat {
