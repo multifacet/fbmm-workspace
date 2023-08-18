@@ -598,7 +598,8 @@ where
         Workload::Memcached { .. } => {
             // We want to place the server and ycsb on different numa nodes
             TasksetCtxBuilder::from_lscpu(&ushell)?
-                .numa_interleaving(TasksetCtxInterleaving::RoundRobin)
+                .numa_interleaving(TasksetCtxInterleaving::Sequential)
+                .skip_hyperthreads(true)
                 .build()
         }
         _ => {
@@ -610,7 +611,6 @@ where
     // Figure out which cores we will use for the workload
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
-        Workload::Memcached { .. } => 2,
         _ => 1,
     };
     let mut pin_cores = Vec::<usize>::new();
@@ -764,6 +764,11 @@ where
         const RECORD_SIZE: usize = 1350;
         // "size" is the size in GB on the cache, so take off a GB to add some wiggle room
         let record_count = ((size - 1) << 30) / RECORD_SIZE;
+        let client_pin_core = if let Ok(core) = tctx.next() {
+            Some(core)
+        } else {
+            None
+        };
         let memcached_cfg = MemcachedWorkloadConfig {
             user: &login.username,
             memcached: &memcached_dir,
@@ -788,7 +793,7 @@ where
                 insert_prop: 1.0 - read_prop - update_prop,
             },
             system: YcsbSystem::Memcached(memcached_cfg),
-            client_pin_core: Some(pin_cores[1]),
+            client_pin_core: client_pin_core,
             ycsb_path: &ycsb_dir,
             ycsb_result_file: Some(&ycsb_file),
         };
