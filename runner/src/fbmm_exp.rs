@@ -79,6 +79,7 @@ struct Config {
     workload: Workload,
 
     perf_stat: bool,
+    perf_periodic: bool,
     perf_counters: Vec<String>,
     disable_thp: bool,
     disable_aslr: bool,
@@ -187,6 +188,9 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
+        (@arg PERF_PERIODIC: --perf_periodic
+         requires[PERF_STAT]
+         "Record perf stat periodically throughout the execution of the application.")
         (@arg PERF_COUNTER: --perf_counter +takes_value ... number_of_values(1)
          requires[PERF_STAT]
          "Which counters to record with perf stat.")
@@ -360,6 +364,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     };
 
     let perf_stat = sub_m.is_present("PERF_STAT");
+    let perf_periodic = sub_m.is_present("PERF_PERIODIC");
     let disable_thp = sub_m.is_present("DISABLE_THP");
     let disable_aslr = sub_m.is_present("DISABLE_ASLR");
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
@@ -439,6 +444,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         exp: "fom_exp".into(),
         workload,
         perf_stat,
+        perf_periodic,
         perf_counters,
         disable_thp,
         disable_aslr,
@@ -634,10 +640,17 @@ where
         .collect::<Vec<_>>()
         .join(",");
     if cfg.perf_stat {
+        let mut extra_args = format!(" -C {} ", &pin_cores_str);
+
+        if cfg.perf_periodic {
+            // Times 1000 because PERIOD is in seconds, and -I takes ms
+            extra_args.push_str(format!(" -I {} ", PERIOD * 1000).as_str());
+        }
+
         cmd_prefix.push_str(&gen_perf_command_prefix(
             perf_stat_file,
             &cfg.perf_counters,
-            format!(" -C {} ", &pin_cores_str),
+            extra_args,
         ));
     }
 
