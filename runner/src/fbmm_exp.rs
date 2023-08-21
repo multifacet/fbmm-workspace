@@ -44,6 +44,7 @@ enum Workload {
     Gups {
         exp: usize,
         hot_exp: Option<usize>,
+        move_hot: bool,
         num_updates: usize,
     },
     PagewalkCoherence {
@@ -149,6 +150,9 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@subcommand gups =>
             (about: "Run the GUPS workload used to eval HeMem")
+            (@arg MOVE_HOT: --move_hot
+             requires[HOT_EXP]
+             "Move the hotset partway through GUPS's execution.")
             (@arg EXP: +required +takes_value {validator::is::<usize>}
              "The log of the size of the workload.")
             (@arg HOT_EXP: +takes_value {validator::is::<usize>}
@@ -298,6 +302,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         }
 
         ("gups", Some(sub_m)) => {
+            let move_hot = sub_m.is_present("MOVE_HOT");
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
             let hot_exp = sub_m
                 .value_of("HOT_EXP")
@@ -310,6 +315,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             Workload::Gups {
                 exp,
                 hot_exp,
+                move_hot,
                 num_updates,
             }
         }
@@ -880,6 +886,7 @@ where
         Workload::Gups {
             exp,
             hot_exp,
+            move_hot,
             num_updates,
         } => {
             time!(timers, "Workload", {
@@ -888,6 +895,7 @@ where
                     &gups_dir,
                     exp,
                     hot_exp,
+                    move_hot,
                     num_updates,
                     Some(&cmd_prefix),
                     &gups_file,
@@ -1064,6 +1072,7 @@ fn run_gups(
     gups_dir: &str,
     exp: usize,
     hot_exp: Option<usize>,
+    move_hot: bool,
     num_updates: usize,
     cmd_prefix: Option<&str>,
     gups_file: &str,
@@ -1075,12 +1084,13 @@ fn run_gups(
     if let Some(hot_exp) = hot_exp {
         ushell.run(
             cmd!(
-                "sudo taskset -c {} {} ./gups-hotset-move 1 {} {} 8 {} | tee {}",
+                "sudo taskset -c {} {} ./gups-hotset-move 1 {} {} 8 {} {} | tee {}",
                 pin_core,
                 cmd_prefix.unwrap_or(""),
                 num_updates,
                 exp,
                 hot_exp,
+                if move_hot { 1 } else { 0 },
                 gups_file,
             )
             .cwd(gups_dir),

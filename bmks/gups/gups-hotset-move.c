@@ -51,6 +51,7 @@ extern double hotset_fraction;
 int threads;
 
 bool move_hotset1 = false;
+bool do_move_hotset = false;
 
 uint64_t hot_start = 0;
 uint64_t hotsize = 0;
@@ -88,13 +89,13 @@ static void *timing_thread()
   for (;;) {
     tic++;
     if (tic >= 150 && tic < 300) {
-      if (!printed1) {
+      if (!printed1 && do_move_hotset) {
         move_hotset1 = true;
         fprintf(stderr, "moved hotset1\n");
         printed1 = true;
       }
     }
-    if (tic >= 250) {
+    if (tic >= 300) {
       stop = true;
     }
     sleep(1);
@@ -232,13 +233,14 @@ int main(int argc, char **argv)
   struct gups_args** ga;
   pthread_t t[MAX_THREADS];
 
-  if (argc != 6) {
+  if (argc != 7) {
     fprintf(stderr, "Usage: %s [threads] [updates per thread] [exponent] [data size (bytes)] [noremap/remap]\n", argv[0]);
     fprintf(stderr, "  threads\t\t\tnumber of threads to launch\n");
     fprintf(stderr, "  updates per thread\t\tnumber of updates per thread\n");
     fprintf(stderr, "  exponent\t\t\tlog size of region\n");
     fprintf(stderr, "  data size\t\t\tsize of data in array (in bytes)\n");
     fprintf(stderr, "  hot size\t\t\tlog size of hot set\n");
+    fprintf(stderr, "  move hotset\t\t\t1 if the hotset should be moved partway through execution, 0 otherwise\n");
     return 0;
   }
 
@@ -259,10 +261,12 @@ int main(int argc, char **argv)
   elt_size = atoi(argv[4]);
   log_hot_size = atof(argv[5]);
   tot_hot_size = (unsigned long)(1) << log_hot_size;
+  do_move_hotset = (bool)atoi(argv[6]);
 
   fprintf(stderr, "%lu updates per thread (%d threads)\n", updates, threads);
   fprintf(stderr, "field of 2^%lu (%lu) bytes\n", expt, size);
   fprintf(stderr, "%ld byte element size (%ld elements total)\n", elt_size, size / elt_size);
+  fprintf(stderr, "Moving hotset %d\n", do_move_hotset);
 
   p = mmap(ADDRESS, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
   if (p == MAP_FAILED) {
