@@ -95,7 +95,7 @@ static void *timing_thread()
         printed1 = true;
       }
     }
-    if (tic >= 600) {
+    if (tic >= 1200) {
       stop = true;
     }
     sleep(1);
