@@ -46,6 +46,6 @@ for row in reader:
 for exp in data:
     plt.hist(data[exp], bins=50, density=True, histtype='step', cumulative=True, label=exp)
 
-plt.legend()
+plt.legend(loc="upper left")
 plt.show()
 
