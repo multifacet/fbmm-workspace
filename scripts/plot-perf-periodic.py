@@ -20,17 +20,21 @@ for line in open(filename, "r"):
         continue
 
     split = line.split()
+    time = float(split[0])
     count = int(split[1].replace(',', ''))
     event = split[2]
 
     if event not in data:
-        data[event] = [0]
+        data[event] = ([0], [0])
 
     # Add the current count to the previous to get a running total
-    data[event].append(count + data[event][-1])
+    data[event][0].append(time)
+    data[event][1].append(count)
 
 for event in data:
-    plt.plot(data[event], label=event.split('.')[-1])
+    plt.plot(data[event][0], data[event][1], label=event.split('.')[-1])
 
+plt.xlabel("Time (s)")
+plt.ylabel("Event counts")
 plt.legend()
 plt.show()
