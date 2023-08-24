@@ -86,6 +86,8 @@ struct Config {
     mm_fault_tracker: bool,
     flame_graph: bool,
     smaps_periodic: bool,
+    tmmfs_stats_periodic: bool,
+    tmmfs_active_list_periodic: bool,
     lock_stat: bool,
     fbmm: Option<MMFS>,
     tpp: bool,
@@ -204,6 +206,12 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Generate a flame graph of the workload.")
         (@arg SMAPS_PERIODIC: --smaps_periodic
          "Collect /proc/[PID]/smaps data periodically for the workload process")
+        (@arg TMMFS_STATS_PERIODIC: --tmmfs_stats_periodic
+         requires[TIEREDMMFS]
+         "Collect /sys/fs/tieredmmfs/stats data periodically.")
+        (@arg TMMFS_ACTIVE_LIST_PERIODIC: --tmmfs_active_list_periodic
+         requires[TIEREDMMFS]
+         "Collect /sys/fs/tieredmmfs/active_list data periodically.")
         (@arg NUMACTL: --numactl
          "If passed, use numactl to make sure the workload only allocates from numa node 0.")
         (@arg LOCK_STAT: --lock_stat
@@ -234,7 +242,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "If passed, specifies the starting point of the reserved PMEM in GB. \
          Default is dram_size + dram_start.")
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
-         "(Optional) If passed, sets the migration task interval to the specified value.")
+         "(Optional) If passed, sets the migration task interval (in ms) to the specified value.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
          conflicts_with[FBMM] conflicts_with[TPP]
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
@@ -370,6 +378,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
+    let tmmfs_stats_periodic = sub_m.is_present("TMMFS_STATS_PERIODIC");
+    let tmmfs_active_list_periodic = sub_m.is_present("TMMFS_ACTIVE_LIST_PERIODIC");
     let numactl = sub_m.is_present("NUMACTL");
     let lock_stat = sub_m.is_present("LOCK_STAT");
     let fbmm = sub_m.is_present("FBMM").then(|| {
@@ -451,6 +461,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         mm_fault_tracker,
         flame_graph,
         smaps_periodic,
+        tmmfs_stats_periodic,
+        tmmfs_active_list_periodic,
         numactl,
         lock_stat,
         fbmm,
@@ -498,6 +510,8 @@ where
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let smaps_file = dir!(&results_dir, cfg.gen_file_name("smaps"));
+    let tmmfs_stats_periodic_file = dir!(&results_dir, cfg.gen_file_name("tmmfs_stats_periodic"));
+    let tmmfs_active_list_periodic_file = dir!(&results_dir, cfg.gen_file_name("tmmfs_active_list"));
     let lock_stat_file = dir!(&results_dir, cfg.gen_file_name("lock_stat"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
     let coherence_file = dir!(&results_dir, cfg.gen_file_name("coherence"));
@@ -672,6 +686,30 @@ where
                 &proc_name, &smaps_file
             ),
             ensure_started: smaps_file,
+        })?;
+    }
+
+    if cfg.tmmfs_stats_periodic {
+        bgctx.spawn(BackgroundTask {
+            name: "tieredmmfs_stats",
+            period: PERIOD,
+            cmd: format!(
+                "(cat /sys/fs/tieredmmfs/stats || echo wait) | tee -a {}",
+                &tmmfs_stats_periodic_file
+            ),
+            ensure_started: tmmfs_stats_periodic_file,
+        })?;
+    }
+
+    if cfg.tmmfs_active_list_periodic {
+        bgctx.spawn(BackgroundTask {
+            name: "tieredmmfs_active_list",
+            period: PERIOD * 3, // This is a lot of data, so *3 to limit collection
+            cmd: format!(
+                "(cat /sys/fs/tieredmmfs/active_list || echo wait) | tee -a {}",
+                &tmmfs_active_list_periodic_file
+            ),
+            ensure_started: tmmfs_active_list_periodic_file,
         })?;
     }
 
