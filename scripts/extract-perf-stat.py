@@ -35,31 +35,56 @@ if using_base_kernel:
     if not did_reserve_mem:
         sort = sort - 1
 
+# Oops, I ran some experiments that collected the perf stats periodically instead of
+# all at once at the end. This variable detects if I did that
+perf_periodic = "perf_periodic" in cmd
+
 local_dram = None
 remote_dram = None
 
-for line in open(filename, "r"):
-    split = line.split()
+if perf_periodic:
+    for line in open(filename, "r"):
+        # Skip lines that are empty or begin with "#"
+        if line.strip() == "" or line[0] == "#":
+            continue
 
-    if len(split) < 2:
-        continue
+        split = line.split()
+        count = int(split[1].replace(',', ''))
+        event = split[2]
 
-    value = split[0]
-    label = split[1]
+        if "local_dram" in event:
+            if local_dram is None:
+                local_dram = count
+            else:
+                local_dram += count
+        if "remote_dram" in event:
+            if remote_dram is None:
+                remote_dram = count
+            else:
+                remote_dram += count
+else:
+    for line in open(filename, "r"):
+        split = line.split()
 
-    if "local_dram" in label:
-        local_dram = value.replace(',', '')
-    elif "remote_dram" in label:
-        remote_dram = value.replace(',', '')
+        if len(split) < 2:
+            continue
 
-combined = str(int(local_dram) + int(remote_dram))
-percent_remote = "{:.3f}".format(float(remote_dram) * 100 / float(combined))
+        value = split[0]
+        label = split[1]
+
+        if "local_dram" in label:
+            local_dram = int(value.replace(',', ''))
+        elif "remote_dram" in label:
+            remote_dram = int(value.replace(',', ''))
+
+combined = str(local_dram + remote_dram)
+percent_remote = "{:.3f}".format(remote_dram * 100 / float(combined))
 
 outdata = {
     "Sort": str(sort),
     "Type": experiment_type,
-    "local_dram": local_dram,
-    "remote_dram": remote_dram,
+    "local_dram": str(local_dram),
+    "remote_dram": str(remote_dram),
     "Combined": combined,
     "Percent Remote": percent_remote,
     "Command": cmd,
