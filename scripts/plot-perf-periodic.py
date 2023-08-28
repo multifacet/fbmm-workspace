@@ -31,9 +31,10 @@ for line in open(filename, "r"):
     data[event][0].append(time)
     data[event][1].append(count)
 
+plt.rcParams.update({"font.size": 18})
+
 for event in data:
     plt.plot(data[event][0], data[event][1], label=event.split('.')[-1])
-
 plt.xlabel("Time (s)")
 plt.ylabel("Event counts")
 plt.legend()
