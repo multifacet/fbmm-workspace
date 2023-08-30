@@ -43,9 +43,12 @@ for row in reader:
             data[experiment_type].append(float(value))
             break
 
+plt.rcParams.update({"font.size": 18})
+
 for exp in data:
     plt.hist(data[exp], bins=50, density=True, histtype='step', cumulative=True, label=exp)
 
 plt.legend(loc="upper left")
+plt.xlabel("Runtime (ms)")
 plt.show()
 
