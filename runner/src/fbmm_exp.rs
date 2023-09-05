@@ -511,7 +511,8 @@ where
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let smaps_file = dir!(&results_dir, cfg.gen_file_name("smaps"));
     let tmmfs_stats_periodic_file = dir!(&results_dir, cfg.gen_file_name("tmmfs_stats_periodic"));
-    let tmmfs_active_list_periodic_file = dir!(&results_dir, cfg.gen_file_name("tmmfs_active_list"));
+    let tmmfs_active_list_periodic_file =
+        dir!(&results_dir, cfg.gen_file_name("tmmfs_active_list"));
     let lock_stat_file = dir!(&results_dir, cfg.gen_file_name("lock_stat"));
     let gups_file = dir!(&results_dir, cfg.gen_file_name("gups"));
     let coherence_file = dir!(&results_dir, cfg.gen_file_name("coherence"));
@@ -519,6 +520,7 @@ where
     let ycsb_file = dir!(&results_dir, cfg.gen_file_name("ycsb"));
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
     let tieredmmfs_stats_file = dir!(&results_dir, cfg.gen_file_name("tieredmmfs_stats"));
+    let vmstat_file = dir!(&results_dir, cfg.gen_file_name("vmstat"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
@@ -998,6 +1000,9 @@ where
             _ => {}
         }
     }
+
+    ushell.run(cmd!("cat /proc/vmstat | tee {}", &vmstat_file))?;
+
     // Generate the flamegraph if needed
     if cfg.flame_graph {
         ushell.run(cmd!(
