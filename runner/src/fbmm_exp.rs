@@ -95,6 +95,9 @@ struct Config {
     pmem_region: Option<MemRegion>,
     numactl: bool,
     migrate_task_int: Option<usize>,
+    numa_scan_size: Option<usize>,
+    numa_scan_delay: Option<usize>,
+    numa_scan_period_min: Option<usize>,
     hugetlb: Option<usize>,
     pte_fault_size: Option<usize>,
 
@@ -243,6 +246,12 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          Default is dram_size + dram_start.")
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
          "(Optional) If passed, sets the migration task interval (in ms) to the specified value.")
+        (@arg NUMA_SCAN_SIZE:  --numa_scan_size +takes_value {validator::is::<usize>}
+         "(Optional) If passed, sets the size of the numa balancing scan size in MB.")
+        (@arg NUMA_SCAN_DELAY: --numa_scan_delay +takes_value {validator::is::<usize>}
+         "(Optional) If passed, sets the time to delay numa balancing scanning in ms.")
+        (@arg NUMA_SCAN_PERIOD_MIN: --numa_scan_period_min +takes_value {validator::is::<usize>}
+         "(Optional) If passed, sets the minimum period between numa balancing scans in ms.")
         (@arg HUGETLB: --hugetlb +takes_value {validator::is::<usize>}
          conflicts_with[FBMM] conflicts_with[TPP]
          "Run certain workloads with libhugetlbfs. Specify the number of huge pages to reserve in GB")
@@ -430,6 +439,15 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let migrate_task_int = sub_m
         .value_of("MIGRATE_TASK_INT")
         .map(|interval| interval.parse::<usize>().unwrap());
+    let numa_scan_size = sub_m
+        .value_of("NUMA_SCAN_SIZE")
+        .map(|size| size.parse::<usize>().unwrap());
+    let numa_scan_delay = sub_m
+        .value_of("NUMA_SCAN_DELAY")
+        .map(|delay| delay.parse::<usize>().unwrap());
+    let numa_scan_period_min = sub_m
+        .value_of("NUMA_SCAN_PERIOD_MIN")
+        .map(|delay| delay.parse::<usize>().unwrap());
     let hugetlb = sub_m
         .value_of("HUGETLB")
         .map(|huge_size| huge_size.parse::<usize>().unwrap());
@@ -470,6 +488,9 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         dram_region,
         pmem_region,
         migrate_task_int,
+        numa_scan_size,
+        numa_scan_delay,
+        numa_scan_period_min,
         hugetlb,
         pte_fault_size,
 
@@ -536,11 +557,12 @@ where
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
 
     // Setup the pmem settings in the grub config before rebooting
-    // First, clear the memmap option from the boot options
+    // First, clear the memmap and tpp options from the boot options
     ushell.run(cmd!("cat /etc/default/grub"))?;
     ushell.run(cmd!(
         r#"sed 's/ memmap=[0-9]*[KMG]![0-9]*[KMG]//g' \
-        /etc/default/grub | sudo tee /tmp/grub"#
+        /etc/default/grub | sed 's/ do_tpp//g' | sed 's/ maxcpus=[0-9]*//g' | \
+        sudo tee /tmp/grub"#
     ))?;
     ushell.run(cmd!("sudo mv /tmp/grub /etc/default/grub"))?;
     // Then, if we are doing an experiment where we reserve RAM, add it in
@@ -561,6 +583,15 @@ where
             ))?;
             ushell.run(cmd!("sudo mv /tmp/grub /etc/default/grub"))?;
         }
+    }
+    // If we are doing an experiment using tpp, add in the option to setup the tiering
+    // If a node has compute, it will be considered toptier, so restrict the CPUs too
+    if cfg.tpp {
+        ushell.run(cmd!(
+            r#"sed 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 do_tpp maxcpus=8"/' \
+            /etc/default/grub | sudo tee /tmp/grub"#
+        ))?;
+        ushell.run(cmd!("sudo mv /tmp/grub /etc/default/grub"))?;
     }
 
     // Finally, update the grub config
@@ -770,6 +801,27 @@ where
     if cfg.tpp {
         // Set the NUMA policy to TPP
         ushell.run(cmd!("sudo sysctl kernel.numa_balancing=2"))?;
+        // Enable for NUMA demotion
+        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/numa/demotion_enabled"))?;
+
+        if let Some(size) = cfg.numa_scan_size {
+            ushell.run(cmd!(
+                "echo {} | sudo tee /proc/sys/kernel/numa_balancing_scan_size_MB",
+                size
+            ))?;
+        }
+        if let Some(delay) = cfg.numa_scan_delay {
+            ushell.run(cmd!(
+                "echo {} | sudo tee /proc/sys/kernel/numa_balancing_scan_delay_ms",
+                delay
+            ))?;
+        }
+        if let Some(period) = cfg.numa_scan_period_min {
+            ushell.run(cmd!(
+                "echo {} | sudo tee /proc/sys/kernel/numa_balancing_scan_period_min_ms",
+                period
+            ))?;
+        }
     } else {
         // These options are not in the TPP kernel
         if let Some(fault_size) = &cfg.pte_fault_size {
