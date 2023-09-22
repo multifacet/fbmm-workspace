@@ -170,12 +170,12 @@ static void *do_gups(void *arguments)
       lfsr = lfsr_fast(lfsr);
       index1 = args->hot_start + (lfsr % args->hotsize);
       if (move_hotset1) {
-        if ((index1 < (args->hotsize / 4))) {
+        if ((index1 < (args->hotsize / 2))) {
           index1 += args->hotsize;
         }
       }
       else {
-        if ((index1 < (args->hotsize / 4))) {
+        if ((index1 < (args->hotsize / 2))) {
           before_accesses++;
         }
       }
