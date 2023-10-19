@@ -7,3 +7,6 @@
 [submodule "bmks/memcached"]
 	path = bmks/memcached
 	url = https://github.com/memcached/memcached.git
+[submodule "bmks/graph500"]
+	path = bmks/graph500
+	url = https://github.com/graph500/graph500.git
