@@ -3,8 +3,7 @@
 use clap::clap_app;
 
 use libscail::{
-    clone_git_repo, dir, downloads, downloads::download_and_extract, get_user_home_dir,
-    install_spec_2017, with_shell, GitRepo, Login,
+    clone_git_repo, dir, install_spec_2017, with_shell, GitRepo, Login,
 };
 
 use spurs::{cmd, Execute, SshShell};
@@ -251,7 +250,6 @@ where
 }
 
 fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
-    let user_home = get_user_home_dir(ushell)?;
     let num_cores = libscail::get_num_cores(ushell)?;
 
     ushell.run(cmd!("mkdir -p {}", crate::RESULTS_PATH))?;
@@ -261,7 +259,10 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     ushell.run(cmd!("make").cwd(bmks_dir))?;
 
     // Download PARSEC and build canneal
-    download_and_extract(ushell, downloads::PARSEC, &user_home, None)?;
+    let parsec_repo = GitRepo::HttpsPublic {
+        repo: "github.com/bamos/parsec-benchmark.git",
+    };
+    clone_git_repo(ushell, parsec_repo, Some("parsec-3.0"), None, None, &[])?;
     ushell.run(cmd!("./parsecmgmt -a build -p canneal").cwd("parsec-3.0/bin/"))?;
 
     // memcached
