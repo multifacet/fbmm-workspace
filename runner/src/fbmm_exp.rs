@@ -56,6 +56,9 @@ enum Workload {
         read_prop: f32,
         update_prop: f32,
     },
+    Graph500 {
+        size: usize,
+    },
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
@@ -190,6 +193,11 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@arg UPDATE_PROP: --update_prop +takes_value {validator::is::<f32>}
              "The proportion of read operations to perform as a value between 0 and 1.\
              The default is 0.5. The proportion on insert operations will be 1 - read_prop - update_prop")
+        )
+        (@subcommand graph500 =>
+            (about: "Run the Graph500 workload")
+            (@arg SIZE: +required +takes_value {validator::is::<usize>}
+             "2^size nodes will be used for the workload.")
         )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
@@ -377,6 +385,14 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             }
         }
 
+        ("graph500", Some(sub_m)) => {
+            let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
+
+            Workload::Graph500 {
+                size,
+            }
+        }
+
         _ => unreachable!(),
     };
 
@@ -542,12 +558,14 @@ where
     let runtime_file = dir!(&results_dir, cfg.gen_file_name("runtime"));
     let tieredmmfs_stats_file = dir!(&results_dir, cfg.gen_file_name("tieredmmfs_stats"));
     let vmstat_file = dir!(&results_dir, cfg.gen_file_name("vmstat"));
+    let graph500_file = dir!(&results_dir, cfg.gen_file_name("graph500"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
     let coherence_dir = dir!(&bmks_dir, "pagewalk_coherence/");
     let ycsb_dir = dir!(&bmks_dir, "YCSB");
     let memcached_dir = dir!(&bmks_dir, "memcached/");
+    let graph500_dir = dir!(&bmks_dir, "graph500/src/");
     let scripts_dir = dir!(
         &user_home,
         crate::RESEARCH_WORKSPACE_PATH,
@@ -627,6 +645,7 @@ where
         Workload::Gups { .. } => "gups",
         Workload::PagewalkCoherence { .. } => "paging",
         Workload::Memcached { .. } => "memcached",
+        Workload::Graph500 { .. } => "graph500_refere",
     };
 
     let (
@@ -1038,6 +1057,20 @@ where
             )) {}
             std::thread::sleep(std::time::Duration::from_secs(20));
         }
+
+        Workload::Graph500 { size } => {
+            time!(timers, "Workload", {
+                run_graph500(
+                    &ushell,
+                    &graph500_dir,
+                    size,
+                    Some(&cmd_prefix),
+                    &graph500_file,
+                    &runtime_file,
+                    pin_cores[0],
+                )?;
+            });
+        }
     }
 
     // If we are using TieredMMFS, print some stats
@@ -1252,6 +1285,35 @@ fn run_pagewalk_coherence(
     )?;
     let duration = Instant::now() - start;
 
+    ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
+
+    Ok(())
+}
+
+fn run_graph500(
+    ushell: &SshShell,
+    graph500_dir: &str,
+    size: usize,
+    cmd_prefix: Option<&str>,
+    graph500_file: &str,
+    runtime_file: &str,
+    pin_core: usize,
+) -> Result<(), failure::Error> {
+
+    let start = Instant::now();
+
+    ushell.run(
+        cmd!(
+            "sudo taskset -c {} {} ./graph500_reference_bfs_sssp {} | tee {}",
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            size,
+            graph500_file
+        )
+        .cwd(graph500_dir),
+    )?;
+
+    let duration = Instant::now() - start;
     ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
 
     Ok(())

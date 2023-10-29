@@ -210,6 +210,7 @@ fn install_host_dependencies(ushell: &SshShell) -> Result<(), failure::Error> {
             "bpfcc-tools",
             "libhugetlbfs-bin",
             "maven",
+            "mpich",
         ]),
     };
 
@@ -229,7 +230,7 @@ fn clone_research_workspace<A>(
 where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
-    const SUBMODULES: &[&str] = &["libscail", "bmks/YCSB", "bmks/memcached"];
+    const SUBMODULES: &[&str] = &["libscail", "bmks/YCSB", "bmks/memcached", "bmks/graph500"];
     let user = &cfg.git_user.unwrap_or("");
     let branch = cfg.wkspc_branch.unwrap_or("main");
     let wkspc_repo = GitRepo::HttpsPrivate {
@@ -275,6 +276,11 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     // Build YCSB
     let ycsb_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "YCSB");
     ushell.run(cmd!("mvn clean package").cwd(ycsb_dir))?;
+
+    // Graph 500
+    let graph500_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "graph500/src");
+    ushell.run(cmd!("sed -i 's/LDFLAGS = -lpthread/LDFLAGS = -pthread/g' ./Makefile").cwd(&graph500_dir))?;
+    ushell.run(cmd!("make").cwd(graph500_dir))?;
 
     Ok(())
 }
