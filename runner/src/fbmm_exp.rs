@@ -97,6 +97,7 @@ struct Config {
     dram_region: Option<MemRegion>,
     pmem_region: Option<MemRegion>,
     numactl: bool,
+    badger_trap: bool,
     migrate_task_int: Option<usize>,
     numa_scan_size: Option<usize>,
     numa_scan_delay: Option<usize>,
@@ -225,6 +226,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Collect /sys/fs/tieredmmfs/active_list data periodically.")
         (@arg NUMACTL: --numactl
          "If passed, use numactl to make sure the workload only allocates from numa node 0.")
+        (@arg BADGER_TRAP: --badger_trap
+         "If passed, use badger trap to monitor the TLB misses of the workload.")
         (@arg LOCK_STAT: --lock_stat
          "Collect lock statistics from the workload.")
         (@arg FBMM: --fbmm
@@ -407,6 +410,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let tmmfs_active_list_periodic = sub_m.is_present("TMMFS_ACTIVE_LIST_PERIODIC");
     let numactl = sub_m.is_present("NUMACTL");
     let lock_stat = sub_m.is_present("LOCK_STAT");
+    let badger_trap = sub_m.is_present("BADGER_TRAP");
     let fbmm = sub_m.is_present("FBMM").then(|| {
         if sub_m.is_present("EXT4") {
             MMFS::Ext4
@@ -498,6 +502,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         tmmfs_stats_periodic,
         tmmfs_active_list_periodic,
         numactl,
+        badger_trap,
         lock_stat,
         fbmm,
         tpp,
@@ -559,6 +564,7 @@ where
     let tieredmmfs_stats_file = dir!(&results_dir, cfg.gen_file_name("tieredmmfs_stats"));
     let vmstat_file = dir!(&results_dir, cfg.gen_file_name("vmstat"));
     let graph500_file = dir!(&results_dir, cfg.gen_file_name("graph500"));
+    let badger_trap_file = dir!(&results_dir, cfg.gen_file_name("badger_trap"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
@@ -883,6 +889,15 @@ where
         }
     }
 
+    // Badger trap will capture stats for anything "after" it in the command,
+    // so it should be the last thing in the command prefix to only capture the
+    // workload's staticstics
+    if cfg.badger_trap {
+        cmd_prefix.push_str(&format!(
+            "{}/badger-trap command", bmks_dir
+        ));
+    }
+
     let ycsb = if let Workload::Memcached {
         size,
         op_count,
@@ -1105,6 +1120,14 @@ where
         ushell.run(cmd!(
             "sudo cat /proc/lock_stat | sudo tee {}",
             lock_stat_file
+        ))?;
+    }
+
+    // Record the badger trap stats if needed
+    if cfg.badger_trap {
+        ushell.run(cmd!(
+            "dmesg | tail -n 10 | sudo tee {}",
+            badger_trap_file
         ))?;
     }
 
