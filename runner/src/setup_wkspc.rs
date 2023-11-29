@@ -2,9 +2,7 @@
 /// all necessary software
 use clap::clap_app;
 
-use libscail::{
-    clone_git_repo, dir, install_spec_2017, with_shell, GitRepo, Login,
-};
+use libscail::{clone_git_repo, dir, install_spec_2017, with_shell, GitRepo, Login};
 
 use spurs::{cmd, Execute, SshShell};
 
@@ -278,8 +276,14 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     ushell.run(cmd!("mvn clean package").cwd(ycsb_dir))?;
 
     // Graph 500
-    let graph500_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "graph500/src");
-    ushell.run(cmd!("sed -i 's/LDFLAGS = -lpthread/LDFLAGS = -pthread/g' ./Makefile").cwd(&graph500_dir))?;
+    let graph500_dir = dir!(
+        crate::RESEARCH_WORKSPACE_PATH,
+        crate::BMKS_PATH,
+        "graph500/src"
+    );
+    ushell.run(
+        cmd!("sed -i 's/LDFLAGS = -lpthread/LDFLAGS = -pthread/g' ./Makefile").cwd(&graph500_dir),
+    )?;
     ushell.run(cmd!("make").cwd(graph500_dir))?;
 
     Ok(())

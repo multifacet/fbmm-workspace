@@ -397,9 +397,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         ("graph500", Some(sub_m)) => {
             let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
 
-            Workload::Graph500 {
-                size,
-            }
+            Workload::Graph500 { size }
         }
 
         _ => unreachable!(),
@@ -834,9 +832,7 @@ where
                     crate::KERNEL_PATH
                 ))?;
 
-                ushell.run(cmd!(
-                    "sudo mount -t ContigMMFS ContigMMFS daxtmp/"
-                ))?;
+                ushell.run(cmd!("sudo mount -t ContigMMFS ContigMMFS daxtmp/"))?;
             }
             MMFS::BandwidthMMFS { .. } => {
                 ushell.run(cmd!(
@@ -857,7 +853,9 @@ where
         // Set the NUMA policy to TPP
         ushell.run(cmd!("sudo sysctl kernel.numa_balancing=2"))?;
         // Enable for NUMA demotion
-        ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/numa/demotion_enabled"))?;
+        ushell.run(cmd!(
+            "echo 1 | sudo tee /sys/kernel/mm/numa/demotion_enabled"
+        ))?;
 
         if let Some(size) = cfg.numa_scan_size {
             ushell.run(cmd!(
@@ -923,9 +921,7 @@ where
     // so it should be the last thing in the command prefix to only capture the
     // workload's staticstics
     if cfg.badger_trap {
-        cmd_prefix.push_str(&format!(
-            "{}/badger-trap command ", bmks_dir
-        ));
+        cmd_prefix.push_str(&format!("{}/badger-trap command ", bmks_dir));
     }
 
     let ycsb = if let Workload::Memcached {
@@ -1155,10 +1151,7 @@ where
 
     // Record the badger trap stats if needed
     if cfg.badger_trap {
-        ushell.run(cmd!(
-            "dmesg | tail -n 10 | sudo tee {}",
-            badger_trap_file
-        ))?;
+        ushell.run(cmd!("dmesg | tail -n 10 | sudo tee {}", badger_trap_file))?;
     }
 
     // Clean up the mm_fault_tracker if it was started
@@ -1352,7 +1345,6 @@ fn run_graph500(
     runtime_file: &str,
     pin_core: usize,
 ) -> Result<(), failure::Error> {
-
     let start = Instant::now();
 
     ushell.run(
