@@ -71,6 +71,8 @@ struct MemRegion {
 enum MMFS {
     Ext4,
     TieredMMFS,
+    ContigMMFS,
+    BandwidthMMFS,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Parametrize)]
@@ -231,7 +233,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg LOCK_STAT: --lock_stat
          "Collect lock statistics from the workload.")
         (@arg FBMM: --fbmm
-         requires[DRAM_SIZE] requires[MMFS_TYPE] conflicts_with[TPP] conflicts_with[HUGETLB]
+         requires[MMFS_TYPE] conflicts_with[TPP] conflicts_with[HUGETLB]
          "Run the workload with file based mm with the specified FS (either ext4 or TieredMMFS).")
         (@arg TPP: --tpp
          requires[DRAM_SIZE] conflicts_with[FBMM] conflicts_with[HUGETLB]
@@ -241,8 +243,12 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@arg EXT4: --ext4
              "Use ext4 as the MM filesystem.")
             (@arg TIEREDMMFS: --tieredmmfs
-             requires[PMEM_SIZE]
+             requires[DRAM_SIZE] requires[PMEM_SIZE]
              "Use TieredMMFS as the MM filesystem.")
+            (@arg CONTIGMMFS: --contigmmfs
+             "Use the ContgMMFS as the MM filesystem.")
+            (@arg BWMMFS: --bwmmfs
+             "Use the BandwidthMMFS as the MM filesystem.")
         )
         (@arg DRAM_SIZE: --dram_size +takes_value {validator::is::<usize>}
          "If passed, reserved the specifies amount of memory in GB as DRAM.")
@@ -416,6 +422,10 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             MMFS::Ext4
         } else if sub_m.is_present("TIEREDMMFS") {
             MMFS::TieredMMFS
+        } else if sub_m.is_present("CONTIGMMFS") {
+            MMFS::ContigMMFS
+        } else if sub_m.is_present("BWMMFS") {
+            MMFS::BandwidthMMFS
         } else {
             panic!("Invalid MM file system. Use either --ext4 or --tieredmmfs");
         }
@@ -784,7 +794,7 @@ where
 
     if let Some(fs) = &cfg.fbmm {
         cmd_prefix.push_str(&format!(
-            "sudo {}/fbmm_wrapper \"{}/daxtmp/\"",
+            "sudo {}/fbmm_wrapper \"{}/daxtmp/\" ",
             bmks_dir, user_home
         ));
 
@@ -817,6 +827,26 @@ where
                         interval
                     ))?;
                 }
+            }
+            MMFS::ContigMMFS { .. } => {
+                ushell.run(cmd!(
+                    "sudo insmod {}/ContigMMFS/contigmmfs.ko",
+                    crate::KERNEL_PATH
+                ))?;
+
+                ushell.run(cmd!(
+                    "sudo mount -t ContigMMFS ContigMMFS daxtmp/"
+                ))?;
+            }
+            MMFS::BandwidthMMFS { .. } => {
+                ushell.run(cmd!(
+                    "sudo insmod {}/BandwidthMMFS/bandwidth.ko",
+                    crate::KERNEL_PATH
+                ))?;
+
+                ushell.run(cmd!(
+                    "sudo mount -t BandwidthMMFS BandwidthMMFS daxtmp/"
+                ))?;
             }
         }
 
@@ -894,7 +924,7 @@ where
     // workload's staticstics
     if cfg.badger_trap {
         cmd_prefix.push_str(&format!(
-            "{}/badger-trap command", bmks_dir
+            "{}/badger-trap command ", bmks_dir
         ));
     }
 

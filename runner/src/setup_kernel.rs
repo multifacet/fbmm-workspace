@@ -117,8 +117,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     ushell.run(cmd!("sudo grub-set-default 0"))?;
 
     if build_mmfs {
-        let tieredmmfs_dir = dir!(&kernel_path, "TieredMMFS/");
-        ushell.run(cmd!("make").cwd(tieredmmfs_dir))?;
+        let mmfs_dirs = ["TieredMMFS/", "ContigMMFS/", "BandwidthMMFS/"];
+        for mmfs in mmfs_dirs {
+            let mmfs_path = dir!(&kernel_path, mmfs);
+            ushell.run(cmd!("make").cwd(mmfs_path))?;
+        }
     }
 
     if install_perf {
