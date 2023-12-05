@@ -42,6 +42,7 @@ enum Workload {
         num_allocs: usize,
     },
     Gups {
+        threads: usize,
         exp: usize,
         hot_exp: Option<usize>,
         move_hot: bool,
@@ -73,6 +74,12 @@ enum MMFS {
     TieredMMFS,
     ContigMMFS,
     BandwidthMMFS,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+struct NodeWeight {
+    nid: u32,
+    weight: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Parametrize)]
@@ -165,6 +172,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@arg MOVE_HOT: --move_hot
              requires[HOT_EXP]
              "Move the hotset partway through GUPS's execution.")
+            (@arg THREADS: --threads + takes_value {validator::is::<usize>}
+             "The number of threads to run GUPS with. Default: 1")
             (@arg EXP: +required +takes_value {validator::is::<usize>}
              "The log of the size of the workload.")
             (@arg HOT_EXP: +takes_value {validator::is::<usize>}
@@ -341,6 +350,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         ("gups", Some(sub_m)) => {
             let move_hot = sub_m.is_present("MOVE_HOT");
+            let threads = sub_m.value_of("THREADS").unwrap_or("1").parse::<usize>().unwrap();
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
             let hot_exp = sub_m
                 .value_of("HOT_EXP")
@@ -351,6 +361,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 (1 << exp) / 8
             };
             Workload::Gups {
+                threads,
                 exp,
                 hot_exp,
                 move_hot,
@@ -688,10 +699,15 @@ where
 
     let mut tctx = match &cfg.workload {
         Workload::Memcached { .. } => {
-            // We want to place the server and ycsb on different numa nodes
             TasksetCtxBuilder::from_lscpu(&ushell)?
                 .numa_interleaving(TasksetCtxInterleaving::Sequential)
                 .skip_hyperthreads(true)
+                .build()
+        }
+        Workload::Gups { .. } => {
+            TasksetCtxBuilder::from_lscpu(&ushell)?
+                .numa_interleaving(TasksetCtxInterleaving::Sequential)
+                .skip_hyperthreads(false)
                 .build()
         }
         _ => {
@@ -703,6 +719,7 @@ where
     // Figure out which cores we will use for the workload
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
+        Workload::Gups { threads, ..} => *threads,
         _ => 1,
     };
     let mut pin_cores = Vec::<usize>::new();
@@ -1049,6 +1066,7 @@ where
         }
 
         Workload::Gups {
+            threads,
             exp,
             hot_exp,
             move_hot,
@@ -1058,6 +1076,7 @@ where
                 run_gups(
                     &ushell,
                     &gups_dir,
+                    threads,
                     exp,
                     hot_exp,
                     move_hot,
@@ -1065,7 +1084,7 @@ where
                     Some(&cmd_prefix),
                     &gups_file,
                     &runtime_file,
-                    pin_cores[0],
+                    &pin_cores_str,
                 )?;
             });
         }
@@ -1257,6 +1276,7 @@ fn run_alloc_test(
 fn run_gups(
     ushell: &SshShell,
     gups_dir: &str,
+    threads: usize,
     exp: usize,
     hot_exp: Option<usize>,
     move_hot: bool,
@@ -1264,16 +1284,17 @@ fn run_gups(
     cmd_prefix: Option<&str>,
     gups_file: &str,
     runtime_file: &str,
-    pin_core: usize,
+    pin_cores_str: &str,
 ) -> Result<(), failure::Error> {
     let start = Instant::now();
 
     if let Some(hot_exp) = hot_exp {
         ushell.run(
             cmd!(
-                "sudo taskset -c {} {} ./gups-hotset-move 1 {} {} 8 {} {} | tee {}",
-                pin_core,
+                "sudo taskset -c {} {} ./gups-hotset-move {} {} {} 8 {} {} | tee {}",
+                pin_cores_str,
                 cmd_prefix.unwrap_or(""),
+                threads,
                 num_updates,
                 exp,
                 hot_exp,
@@ -1285,9 +1306,10 @@ fn run_gups(
     } else {
         ushell.run(
             cmd!(
-                "sudo taskset -c {} {} ./gups 1 {} {} 8 | tee {}",
-                pin_core,
+                "sudo taskset -c {} {} ./gups {} {} {} 8 | tee {}",
+                pin_cores_str,
                 cmd_prefix.unwrap_or(""),
+                threads,
                 num_updates,
                 exp,
                 gups_file,
