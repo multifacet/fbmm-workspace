@@ -105,6 +105,7 @@ struct Config {
     tpp: bool,
     dram_region: Option<MemRegion>,
     pmem_region: Option<MemRegion>,
+    node_weights: Vec<NodeWeight>,
     numactl: bool,
     badger_trap: bool,
     migrate_task_int: Option<usize>,
@@ -270,6 +271,10 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          requires[TIEREDMMFS]
          "If passed, specifies the starting point of the reserved PMEM in GB. \
          Default is dram_size + dram_start.")
+        (@arg NODE_WEIGHT: --node_weight +takes_value ... number_of_values(1)
+         requires[BWMMFS]
+         "The node weights to use when using BWMMFS. Taken in the form of \"<nid>:<weight>\". \
+         The default node weight is 1.")
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
          "(Optional) If passed, sets the migration task interval (in ms) to the specified value.")
         (@arg NUMA_SCAN_SIZE:  --numa_scan_size +takes_value {validator::is::<usize>}
@@ -475,6 +480,21 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             start: pmem_start,
         }
     });
+    let node_weights: Vec<NodeWeight> =
+        sub_m
+            .values_of("NODE_WEIGHT")
+            .map_or(Vec::new(), |counters| {
+                counters
+                    .map(|s| {
+                        // The format of a node weight is <nid>:<weight>
+                        let split: Vec<&str> = s.split(":").collect();
+                        let nid = split[0].parse::<u32>().unwrap();
+                        let weight = split[1].parse::<u32>().unwrap();
+
+                        NodeWeight { nid, weight }
+                    })
+                    .collect()
+            });
     let migrate_task_int = sub_m
         .value_of("MIGRATE_TASK_INT")
         .map(|interval| interval.parse::<usize>().unwrap());
@@ -527,6 +547,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         tpp,
         dram_region,
         pmem_region,
+        node_weights,
         migrate_task_int,
         numa_scan_size,
         numa_scan_delay,
@@ -857,9 +878,16 @@ where
                     crate::KERNEL_PATH
                 ))?;
 
-                ushell.run(cmd!(
-                    "sudo mount -t BandwidthMMFS BandwidthMMFS daxtmp/"
-                ))?;
+                ushell.run(cmd!("sudo mount -t BandwidthMMFS BandwidthMMFS daxtmp/"))?;
+
+                // Set the appropriate node weights
+                for weight in &cfg.node_weights {
+                    ushell.run(cmd!(
+                        "echo {} | sudo tee /sys/fs/bwmmfs*/node{}/weight",
+                        weight.weight,
+                        weight.nid
+                    ))?;
+                }
             }
         }
 
