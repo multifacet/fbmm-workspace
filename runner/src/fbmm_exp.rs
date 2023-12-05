@@ -359,7 +359,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
         ("gups", Some(sub_m)) => {
             let move_hot = sub_m.is_present("MOVE_HOT");
-            let threads = sub_m.value_of("THREADS").unwrap_or("1").parse::<usize>().unwrap();
+            let threads = sub_m
+                .value_of("THREADS")
+                .unwrap_or("1")
+                .parse::<usize>()
+                .unwrap();
             let exp = sub_m.value_of("EXP").unwrap().parse::<usize>().unwrap();
             let hot_exp = sub_m
                 .value_of("HOT_EXP")
@@ -727,18 +731,14 @@ where
     }
 
     let mut tctx = match &cfg.workload {
-        Workload::Memcached { .. } => {
-            TasksetCtxBuilder::from_lscpu(&ushell)?
-                .numa_interleaving(TasksetCtxInterleaving::Sequential)
-                .skip_hyperthreads(true)
-                .build()
-        }
-        Workload::Gups { .. } => {
-            TasksetCtxBuilder::from_lscpu(&ushell)?
-                .numa_interleaving(TasksetCtxInterleaving::Sequential)
-                .skip_hyperthreads(false)
-                .build()
-        }
+        Workload::Memcached { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+            .numa_interleaving(TasksetCtxInterleaving::Sequential)
+            .skip_hyperthreads(true)
+            .build(),
+        Workload::Gups { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+            .numa_interleaving(TasksetCtxInterleaving::Sequential)
+            .skip_hyperthreads(false)
+            .build(),
         _ => {
             let cores = libscail::get_num_cores(&ushell)?;
             TasksetCtxBuilder::simple(cores).build()
@@ -748,7 +748,7 @@ where
     // Figure out which cores we will use for the workload
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
-        Workload::Gups { threads, ..} => *threads,
+        Workload::Gups { threads, .. } => *threads,
         _ => 1,
     };
     let mut pin_cores = Vec::<usize>::new();
