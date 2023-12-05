@@ -60,6 +60,7 @@ enum Workload {
     Graph500 {
         size: usize,
     },
+    Stream,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
@@ -211,6 +212,9 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (about: "Run the Graph500 workload")
             (@arg SIZE: +required +takes_value {validator::is::<usize>}
              "2^size nodes will be used for the workload.")
+        )
+        (@subcommand stream =>
+            (about: "Run the STREAM ubmk")
         )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
@@ -416,6 +420,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             Workload::Graph500 { size }
         }
 
+        ("stream", Some(_)) => Workload::Stream,
+
         _ => unreachable!(),
     };
 
@@ -604,6 +610,7 @@ where
     let tieredmmfs_stats_file = dir!(&results_dir, cfg.gen_file_name("tieredmmfs_stats"));
     let vmstat_file = dir!(&results_dir, cfg.gen_file_name("vmstat"));
     let graph500_file = dir!(&results_dir, cfg.gen_file_name("graph500"));
+    let stream_file = dir!(&results_dir, cfg.gen_file_name("stream"));
     let badger_trap_file = dir!(&results_dir, cfg.gen_file_name("badger_trap"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
@@ -692,6 +699,7 @@ where
         Workload::PagewalkCoherence { .. } => "paging",
         Workload::Memcached { .. } => "memcached",
         Workload::Graph500 { .. } => "graph500_refere",
+        Workload::Stream => "stream",
     };
 
     let (
@@ -1159,6 +1167,19 @@ where
                 )?;
             });
         }
+
+        Workload::Stream => {
+            time!(timers, "Workload", {
+                run_stream(
+                    &ushell,
+                    &bmks_dir,
+                    Some(&cmd_prefix),
+                    &stream_file,
+                    &runtime_file,
+                    pin_cores[0],
+                )?;
+            })
+        }
     }
 
     // If we are using TieredMMFS, print some stats
@@ -1406,6 +1427,32 @@ fn run_graph500(
             graph500_file
         )
         .cwd(graph500_dir),
+    )?;
+
+    let duration = Instant::now() - start;
+    ushell.run(cmd!("echo {} > {}", duration.as_millis(), runtime_file))?;
+
+    Ok(())
+}
+
+fn run_stream(
+    ushell: &SshShell,
+    bmks_dir: &str,
+    cmd_prefix: Option<&str>,
+    stream_file: &str,
+    runtime_file: &str,
+    pin_core: usize,
+) -> Result<(), failure::Error> {
+    let start = Instant::now();
+
+    ushell.run(
+        cmd!(
+            "sudo taskset -c {} {} ./stream | tee {}",
+            pin_core,
+            cmd_prefix.unwrap_or(""),
+            stream_file
+        )
+        .cwd(bmks_dir),
     )?;
 
     let duration = Instant::now() - start;

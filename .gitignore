@@ -9,3 +9,4 @@ doc/book/
 bmks/alloc_test
 bmks/fbmm_wrapper
 bmks/badger-trap
+bmks/stream

@@ -1,4 +1,4 @@
-all: alloc_test fbmm_wrapper badger-trap gups/gups
+all: alloc_test fbmm_wrapper badger-trap stream gups/gups
 	@echo "done"
 
 alloc_test: alloc_test.c
@@ -10,9 +10,12 @@ fbmm_wrapper: fbmm_wrapper.c
 badger-trap: badger-trap.c
 	gcc badger-trap.c -o badger-trap
 
+stream: stream.c
+	gcc -O stream.c -DSTREAM_ARRAY_SIZE=100000000 -DNTIMES=50 -o stream
+
 gups/gups:
 	$(MAKE) -C gups/
 
 clean:
-	rm -rf fbmm_wrapper alloc_test badger-trap
+	rm -rf fbmm_wrapper alloc_test badger-trap stream
 	$(MAKE) -C gups/ clean
