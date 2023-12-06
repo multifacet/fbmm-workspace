@@ -60,7 +60,9 @@ enum Workload {
     Graph500 {
         size: usize,
     },
-    Stream,
+    Stream {
+        threads: usize,
+    },
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
@@ -174,7 +176,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@arg MOVE_HOT: --move_hot
              requires[HOT_EXP]
              "Move the hotset partway through GUPS's execution.")
-            (@arg THREADS: --threads + takes_value {validator::is::<usize>}
+            (@arg THREADS: --threads +takes_value {validator::is::<usize>}
              "The number of threads to run GUPS with. Default: 1")
             (@arg EXP: +required +takes_value {validator::is::<usize>}
              "The log of the size of the workload.")
@@ -215,6 +217,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         )
         (@subcommand stream =>
             (about: "Run the STREAM ubmk")
+            (@arg THREADS: --threads +takes_value {validator::is::<usize>}
+             "The number of threads to run GUPS with. Default: 1")
         )
         (@arg PERF_STAT: --perf_stat
          "Attach perf stat to the workload.")
@@ -424,7 +428,14 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             Workload::Graph500 { size }
         }
 
-        ("stream", Some(_)) => Workload::Stream,
+        ("stream", Some(sub_m)) => {
+            let threads = sub_m
+                .value_of("THREADS")
+                .unwrap_or("1")
+                .parse::<usize>()
+                .unwrap();
+            Workload::Stream { threads }
+        }
 
         _ => unreachable!(),
     };
@@ -703,7 +714,7 @@ where
         Workload::PagewalkCoherence { .. } => "paging",
         Workload::Memcached { .. } => "memcached",
         Workload::Graph500 { .. } => "graph500_refere",
-        Workload::Stream => "stream",
+        Workload::Stream { .. } => "stream",
     };
 
     let (
@@ -731,13 +742,9 @@ where
     }
 
     let mut tctx = match &cfg.workload {
-        Workload::Memcached { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+        Workload::Memcached { .. } | Workload::Gups { .. } |Workload::Stream { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
             .numa_interleaving(TasksetCtxInterleaving::Sequential)
             .skip_hyperthreads(true)
-            .build(),
-        Workload::Gups { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
-            .numa_interleaving(TasksetCtxInterleaving::Sequential)
-            .skip_hyperthreads(false)
             .build(),
         _ => {
             let cores = libscail::get_num_cores(&ushell)?;
@@ -749,6 +756,7 @@ where
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
         Workload::Gups { threads, .. } => *threads,
+        Workload::Stream { threads } => *threads,
         _ => 1,
     };
     let mut pin_cores = Vec::<usize>::new();
@@ -1168,7 +1176,7 @@ where
             });
         }
 
-        Workload::Stream => {
+        Workload::Stream { .. } => {
             time!(timers, "Workload", {
                 run_stream(
                     &ushell,
@@ -1176,7 +1184,7 @@ where
                     Some(&cmd_prefix),
                     &stream_file,
                     &runtime_file,
-                    pin_cores[0],
+                    &pin_cores_str,
                 )?;
             })
         }
@@ -1441,14 +1449,14 @@ fn run_stream(
     cmd_prefix: Option<&str>,
     stream_file: &str,
     runtime_file: &str,
-    pin_core: usize,
+    pin_cores_str: &str,
 ) -> Result<(), failure::Error> {
     let start = Instant::now();
 
     ushell.run(
         cmd!(
             "sudo taskset -c {} {} ./stream | tee {}",
-            pin_core,
+            pin_cores_str,
             cmd_prefix.unwrap_or(""),
             stream_file
         )

@@ -11,7 +11,7 @@ badger-trap: badger-trap.c
 	gcc badger-trap.c -o badger-trap
 
 stream: stream.c
-	gcc -O stream.c -DSTREAM_ARRAY_SIZE=100000000 -DNTIMES=50 -o stream
+	gcc -O stream.c -fopenmp -D_OPENMP -DSTREAM_ARRAY_SIZE=100000000 -DNTIMES=50 -o stream
 
 gups/gups:
 	$(MAKE) -C gups/
