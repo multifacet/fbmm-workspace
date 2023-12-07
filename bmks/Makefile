@@ -2,7 +2,7 @@ all: alloc_test fbmm_wrapper badger-trap stream gups/gups
 	@echo "done"
 
 alloc_test: alloc_test.c
-	gcc alloc_test.c -o alloc_test
+	gcc -pthread alloc_test.c -o alloc_test
 
 fbmm_wrapper: fbmm_wrapper.c
 	gcc fbmm_wrapper.c -o fbmm_wrapper
