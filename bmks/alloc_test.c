@@ -78,6 +78,9 @@ int main(int argc, char *argv[]) {
 		flags |= MAP_HUGETLB;
 	}
 
+	size = strtoul(argv[1], NULL, 10);
+	size = size << PAGE_SHIFT;
+
 	addr = malloc(num_threads * sizeof(void**));
 	threads = malloc(num_threads * sizeof(pthread_t));
 	for (int i = 0; i < num_threads; i++) {
@@ -118,9 +121,8 @@ int main(int argc, char *argv[]) {
 	printf("Total unmap time: %llu cycles\n", total_unmap_time);
 
 
-	size = strtoul(argv[1], NULL, 10);
-	size = size << PAGE_SHIFT;
-
+	for (int i = 0; i < num_threads; i++)
+		free(addr[i]);
 	free(addr);
 	return 0;
 }
