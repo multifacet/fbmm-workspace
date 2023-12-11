@@ -40,6 +40,8 @@ enum Workload {
     AllocTest {
         size: usize,
         num_allocs: usize,
+        threads: usize,
+        populate: bool,
     },
     Gups {
         threads: usize,
@@ -147,9 +149,13 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@subcommand alloctest =>
             (about: "Run the `alloctest` workload.")
             (@arg SIZE: +required +takes_value {validator::is::<usize>}
-             "The number of GBs of memory to use")
+             "The number of pages to map in each allocation")
             (@arg NUM_ALLOCS: +takes_value {validator::is::<usize>}
              "The number of calls to mmap to do")
+            (@arg THREADS: --threads +takes_value {validator::is::<usize>}
+             "The number of threads to run alloctest with")
+            (@arg POPULATE: --populate
+             "Run alloctest where regions are MMAPed with the MAP_POPULATE flag")
         )
         (@subcommand canneal =>
             (about: "Run the canneal workload.")
@@ -329,7 +335,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .unwrap_or("1")
                 .parse::<usize>()
                 .unwrap();
-            Workload::AllocTest { size, num_allocs }
+            let threads = sub_m
+                .value_of("THREADS")
+                .unwrap_or("1")
+                .parse::<usize>()
+                .unwrap();
+            let populate = sub_m.is_present("POPULATE");
+            Workload::AllocTest { size, num_allocs, threads, populate }
         }
 
         ("canneal", Some(sub_m)) => {
@@ -627,6 +639,7 @@ where
     let graph500_file = dir!(&results_dir, cfg.gen_file_name("graph500"));
     let stream_file = dir!(&results_dir, cfg.gen_file_name("stream"));
     let badger_trap_file = dir!(&results_dir, cfg.gen_file_name("badger_trap"));
+    let fbmm_stats_file = dir!(&results_dir, cfg.gen_file_name("fbmm_stats"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
@@ -685,17 +698,13 @@ where
 
     let ushell = connect_and_setup_host(login)?;
 
-    let use_hugetlb = if let Some(hugetlb_size_gb) = &cfg.hugetlb {
+    if let Some(hugetlb_size_gb) = &cfg.hugetlb {
         // There are 512 huge pages per GB
         let num_pages = hugetlb_size_gb * 1024 / 2;
         ushell.run(cmd!("sudo hugeadm --pool-pages-min 2MB:{}", num_pages))?;
         // Print out the huge page reservations for the log
         ushell.run(cmd!("hugeadm --pool-list"))?;
-
-        true
-    } else {
-        false
-    };
+    }
 
     ushell.run(cmd!(
         "echo {} > {}",
@@ -746,6 +755,10 @@ where
             .numa_interleaving(TasksetCtxInterleaving::Sequential)
             .skip_hyperthreads(true)
             .build(),
+        Workload::AllocTest { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+            .numa_interleaving(TasksetCtxInterleaving::Sequential)
+            .skip_hyperthreads(false)
+            .build(),
         _ => {
             let cores = libscail::get_num_cores(&ushell)?;
             TasksetCtxBuilder::simple(cores).build()
@@ -755,8 +768,7 @@ where
     // Figure out which cores we will use for the workload
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
-        Workload::Gups { threads, .. } => *threads,
-        Workload::Stream { threads } => *threads,
+        Workload::Gups { threads, .. } | Workload::AllocTest { threads, .. } | Workload::Stream { threads } => *threads,
         _ => 1,
     };
     let mut pin_cores = Vec::<usize>::new();
@@ -1056,18 +1068,19 @@ where
     };
 
     match cfg.workload {
-        Workload::AllocTest { size, num_allocs } => {
+        Workload::AllocTest { size, num_allocs, threads, populate } => {
             time!(timers, "Workload", {
                 run_alloc_test(
                     &ushell,
                     &bmks_dir,
                     size,
                     num_allocs,
+                    threads,
                     Some(&cmd_prefix),
                     &alloc_test_file,
                     &runtime_file,
-                    pin_cores[0],
-                    use_hugetlb,
+                    &pin_cores_str,
+                    populate,
                 )?;
             });
         }
@@ -1190,9 +1203,12 @@ where
         }
     }
 
-    // If we are using TieredMMFS, print some stats
+    // If we are using FBMM, print some stats
     if let Some(fs) = &cfg.fbmm {
+        ushell.run(cmd!("cat /sys/kernel/mm/fbmm/stats | tee {}", &fbmm_stats_file))?;
+
         match fs {
+            // If we are using TieredMMFS, print some more stats
             MMFS::TieredMMFS { .. } => {
                 ushell.run(cmd!(
                     "cat /sys/fs/tieredmmfs/stats | tee {}",
@@ -1302,24 +1318,26 @@ fn run_alloc_test(
     bmks_dir: &str,
     size: usize,
     num_allocs: usize,
+    threads: usize,
     cmd_prefix: Option<&str>,
     alloc_test_file: &str,
     runtime_file: &str,
-    pin_core: usize,
-    use_hugetlb: bool,
+    pin_cores_str: &str,
+    use_map_populate: bool,
 ) -> Result<(), failure::Error> {
-    // alloc_test uses MAP_HUGETLB is it has a third arg
-    let hugetlb_arg = if use_hugetlb { "hugetlb" } else { "" };
+    // alloc_test uses MAP_POPULATE if it has a fourth arg
+    let populate_arg = if use_map_populate { "populate" } else { "" };
 
     let start = Instant::now();
     ushell.run(
         cmd!(
-            "sudo taskset -c {} {} ./alloc_test {} {} {} | sudo tee {}",
-            pin_core,
+            "sudo taskset -c {} {} ./alloc_test {} {} {} {} | sudo tee {}",
+            pin_cores_str,
             cmd_prefix.unwrap_or(""),
             size,
             num_allocs,
-            hugetlb_arg,
+            threads,
+            populate_arg,
             alloc_test_file
         )
         .cwd(bmks_dir),

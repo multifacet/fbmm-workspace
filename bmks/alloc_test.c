@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
 		num_threads = strtoul(argv[3], NULL, 10);
 	}
 	if (argc >= 5) {
-		flags |= MAP_HUGETLB;
+		flags |= MAP_POPULATE;
 	}
 
 	size = strtoul(argv[1], NULL, 10);
