@@ -864,7 +864,6 @@ where
 
         // Set up the remote for FOM
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
-        ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
 
         match fs {
             MMFS::Ext4 { .. } => {
@@ -919,6 +918,7 @@ where
             }
         }
 
+        ushell.run(cmd!("sudo chown -R $USER daxtmp/"))?;
         ushell.run(cmd!("echo 1 | sudo tee /sys/kernel/mm/fbmm/state"))?;
     }
 
