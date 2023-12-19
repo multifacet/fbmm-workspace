@@ -101,6 +101,7 @@ struct Config {
     disable_thp: bool,
     disable_aslr: bool,
     mm_fault_tracker: bool,
+    mmap_tracker: bool,
     flame_graph: bool,
     smaps_periodic: bool,
     tmmfs_stats_periodic: bool,
@@ -240,6 +241,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "Disable ASLR.")
         (@arg MM_FAULT_TRACKER: --mm_fault_tracker
          "Record page fault statistics with mm_fault_tracker.")
+        (@arg MMAP_TRACKER: --mmap_tracker
+         "Record page fault statistics with mmap_tracker.")
         (@arg FLAME_GRAPH: --flame_graph
          "Generate a flame graph of the workload.")
         (@arg SMAPS_PERIODIC: --smaps_periodic
@@ -457,6 +460,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let disable_thp = sub_m.is_present("DISABLE_THP");
     let disable_aslr = sub_m.is_present("DISABLE_ASLR");
     let mm_fault_tracker = sub_m.is_present("MM_FAULT_TRACKER");
+    let mmap_tracker = sub_m.is_present("MMAP_TRACKER");
     let flame_graph = sub_m.is_present("FLAME_GRAPH");
     let smaps_periodic = sub_m.is_present("SMAPS_PERIODIC");
     let tmmfs_stats_periodic = sub_m.is_present("TMMFS_STATS_PERIODIC");
@@ -569,6 +573,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         disable_thp,
         disable_aslr,
         mm_fault_tracker,
+        mmap_tracker,
         flame_graph,
         smaps_periodic,
         tmmfs_stats_periodic,
@@ -623,6 +628,7 @@ where
     let perf_stat_file = dir!(&results_dir, cfg.gen_file_name("perf_stat"));
     let perf_record_file = "/tmp/perf.data";
     let mm_fault_file = dir!(&results_dir, cfg.gen_file_name("mm_fault"));
+    let mmap_tracker_file = dir!(&results_dir, cfg.gen_file_name("mmap_tracker"));
     let flame_graph_file = dir!(&results_dir, cfg.gen_file_name("flamegraph.svg"));
     let smaps_file = dir!(&results_dir, cfg.gen_file_name("smaps"));
     let tmmfs_stats_periodic_file = dir!(&results_dir, cfg.gen_file_name("tmmfs_stats_periodic"));
@@ -1067,6 +1073,22 @@ where
         None
     };
 
+    // Start the mm_fault_tracker BPF script if requested
+    let mmap_tracker_handle = if cfg.mmap_tracker {
+        let spawn_handle = ushell.spawn(cmd!(
+            "sudo {}/mmap_tracker.py -c {} | tee {}",
+            &scripts_dir,
+            &proc_name,
+            &mmap_tracker_file,
+        ))?;
+        // Wait some time for the BPF validator to begin
+        println!("Waiting for BPF validator to complete...");
+        ushell.run(cmd!("sleep 10"))?;
+
+        Some(spawn_handle)
+    } else {
+        None
+    };
     match cfg.workload {
         Workload::AllocTest { size, num_allocs, threads, populate } => {
             time!(timers, "Workload", {
@@ -1249,6 +1271,10 @@ where
     // Clean up the mm_fault_tracker if it was started
     if let Some(handle) = mm_fault_tracker_handle {
         ushell.run(cmd!("sudo killall -SIGINT mm_fault_tracker.py"))?;
+        handle.join().1?;
+    }
+    if let Some(handle) = mmap_tracker_handle {
+        ushell.run(cmd!("sudo killall -SIGINT mmap_tracker.py"))?;
         handle.join().1?;
     }
 
