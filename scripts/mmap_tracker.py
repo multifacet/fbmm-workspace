@@ -20,7 +20,7 @@ struct mmap_info_t {
 	u32 pid;
 	u32 tgid;
 	char comm[TASK_COMM_LEN];
-}
+};
 
 BPF_PERF_OUTPUT(mmap_events);
 
@@ -84,7 +84,7 @@ format_string = "%-10.10s,%-6d,%-6d,%-14d"
 print(header_string % ("COMM", "PID", "TGID", "MMAP_LEN"))
 
 def handle_mmap_event(cpu, data, size):
-	event: b["mmap_events"].event(data)
+	event = b["mmap_events"].event(data)
 
 	print(format_string % (event.comm, event.pid, event.tgid, event.len))
 	sys.stdout.flush()
