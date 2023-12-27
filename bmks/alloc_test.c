@@ -22,7 +22,7 @@ static __inline__ unsigned long long rdtsc(void)
 
 void *map_thread(void *ptr) {
 	unsigned long long start, end;
-	unsigned long long map_time;
+	unsigned long long map_time = 0;
 	void **addr = (void**) ptr;
 
 	while (!begin) {}
@@ -42,7 +42,7 @@ void *map_thread(void *ptr) {
 
 void *unmap_thread(void *ptr) {
 	unsigned long long start, end;
-	unsigned long long unmap_time;
+	unsigned long long unmap_time = 0;
 	void **addr = (void**) ptr;
 
 	while (!begin) {}
@@ -88,35 +88,49 @@ int main(int argc, char *argv[]) {
 	}
 
 	// map threads
-	for (int i = 0; i < num_threads; i++) {
-		pthread_create(&threads[i], NULL, map_thread, addr[i]);
+	if (num_threads == 1) {
+		begin = 1;
+		total_map_time = (unsigned long long)map_thread(addr[0]);
+	} else {
+		for (int i = 0; i < num_threads; i++) {
+			pthread_create(&threads[i], NULL, map_thread, addr[i]);
+		}
 	}
 
 	printf("Started map threads\n");
 	begin = 1;
 
-	for (int i = 0; i < num_threads; i++) {
-		unsigned long long map_time;
-		pthread_join(threads[i], (void**)&map_time);
+	if (num_threads > 1) {
+		for (int i = 0; i < num_threads; i++) {
+			unsigned long long map_time;
+			pthread_join(threads[i], (void**)&map_time);
 
-		total_map_time += map_time;
+			total_map_time += map_time;
+		}
 	}
 	printf("Total map time: %llu cycles\n", total_map_time);
 
 	// unmap threads
 	begin = 0;
-	for (int i = 0; i < num_threads; i++) {
-		pthread_create(&threads[i], NULL, unmap_thread, addr[i]);
+	if (num_threads == 1) {
+		begin = 1;
+		total_unmap_time = (unsigned long long)unmap_thread(addr[0]);
+	} else {
+		for (int i = 0; i < num_threads; i++) {
+			pthread_create(&threads[i], NULL, unmap_thread, addr[i]);
+		}
 	}
 
 	printf("Started unmap threads\n");
 	begin = 1;
 
-	for (int i = 0; i < num_threads; i++) {
-		unsigned long long unmap_time;
-		pthread_join(threads[i], (void**)&unmap_time);
+	if (num_threads > 1) {
+		for (int i = 0; i < num_threads; i++) {
+			unsigned long long unmap_time;
+			pthread_join(threads[i], (void**)&unmap_time);
 
-		total_unmap_time += unmap_time;
+			total_unmap_time += unmap_time;
+		}
 	}
 	printf("Total unmap time: %llu cycles\n", total_unmap_time);
 
