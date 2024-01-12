@@ -808,7 +808,7 @@ where
 
     if cfg.flame_graph {
         cmd_prefix.push_str(&format!(
-            "sudo perf record -a -C {} -g -F 99 -o {} ",
+            "sudo perf record -a -C {} -g -F 1999 -o {} ",
             &pin_cores_str, &perf_record_file
         ));
     }
