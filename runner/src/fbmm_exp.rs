@@ -1003,6 +1003,23 @@ where
         cmd_prefix.push_str(&format!("{}/badger-trap command ", bmks_dir));
     }
 
+    // Start the mm_fault_tracker BPF script if requested
+    let mmap_tracker_handle = if cfg.mmap_tracker {
+        let spawn_handle = ushell.spawn(cmd!(
+            "sudo {}/mmap_tracker.py -c {} | tee {}",
+            &scripts_dir,
+            &proc_name,
+            &mmap_tracker_file,
+        ))?;
+        // Wait some time for the BPF validator to begin
+        println!("Waiting for BPF validator to complete...");
+        ushell.run(cmd!("sleep 10"))?;
+
+        Some(spawn_handle)
+    } else {
+        None
+    };
+
     let ycsb = if let Workload::Memcached {
         size,
         op_count,
@@ -1073,22 +1090,6 @@ where
         None
     };
 
-    // Start the mm_fault_tracker BPF script if requested
-    let mmap_tracker_handle = if cfg.mmap_tracker {
-        let spawn_handle = ushell.spawn(cmd!(
-            "sudo {}/mmap_tracker.py -c {} | tee {}",
-            &scripts_dir,
-            &proc_name,
-            &mmap_tracker_file,
-        ))?;
-        // Wait some time for the BPF validator to begin
-        println!("Waiting for BPF validator to complete...");
-        ushell.run(cmd!("sleep 10"))?;
-
-        Some(spawn_handle)
-    } else {
-        None
-    };
     match cfg.workload {
         Workload::AllocTest { size, num_allocs, threads, populate } => {
             time!(timers, "Workload", {
