@@ -34,6 +34,7 @@ enum Workload {
     Spec2017Xz {
         size: usize,
     },
+    Spec2017CactuBSSN,
     Canneal {
         workload: CannealWorkload,
     },
@@ -76,6 +77,9 @@ struct MemRegion {
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum MMFS {
     Ext4,
+    BasicMMFS {
+        num_pages: usize,
+    },
     TieredMMFS,
     ContigMMFS,
     BandwidthMMFS,
@@ -269,6 +273,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@attributes requires[FBMM])
             (@arg EXT4: --ext4
              "Use ext4 as the MM filesystem.")
+            (@arg BASICMMFS: --basicmmfs +takes_value {validator::is::<usize>}
+             "Use the BasicMMFS as the MM filesystem. Takes the number of pages it should reserve.")
             (@arg TIEREDMMFS: --tieredmmfs
              requires[DRAM_SIZE] requires[PMEM_SIZE]
              "Use TieredMMFS as the MM filesystem.")
@@ -372,6 +378,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 "mcf" => Workload::Spec2017Mcf,
                 "xalancbmk" => Workload::Spec2017Xalancbmk,
                 "xz" => Workload::Spec2017Xz { size },
+                "cactubssn" => Workload::Spec2017CactuBSSN,
                 _ => panic!("Unknown spec workload"),
             }
         }
@@ -471,6 +478,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     let fbmm = sub_m.is_present("FBMM").then(|| {
         if sub_m.is_present("EXT4") {
             MMFS::Ext4
+        } else if let Some(num_pages_str) = sub_m.value_of("BASICMMFS") {
+            let num_pages = num_pages_str.parse::<usize>().unwrap();
+            MMFS::BasicMMFS {
+                num_pages,
+            }
         } else if sub_m.is_present("TIEREDMMFS") {
             MMFS::TieredMMFS
         } else if sub_m.is_present("CONTIGMMFS") {
@@ -725,6 +737,7 @@ where
         Workload::Spec2017Mcf => "mcf_s",
         Workload::Spec2017Xalancbmk => "xalancbmk_s",
         Workload::Spec2017Xz { size: _ } => "xz_s",
+        Workload::Spec2017CactuBSSN => "cactuBSSN_s",
         Workload::Gups { .. } => "gups",
         Workload::PagewalkCoherence { .. } => "paging",
         Workload::Memcached { .. } => "memcached",
@@ -761,7 +774,7 @@ where
             .numa_interleaving(TasksetCtxInterleaving::Sequential)
             .skip_hyperthreads(true)
             .build(),
-        Workload::AllocTest { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+        Workload::AllocTest { .. } | Workload::Spec2017CactuBSSN => TasksetCtxBuilder::from_lscpu(&ushell)?
             .numa_interleaving(TasksetCtxInterleaving::Sequential)
             .skip_hyperthreads(false)
             .build(),
@@ -774,6 +787,7 @@ where
     // Figure out which cores we will use for the workload
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
+        Workload::Spec2017CactuBSSN => 16,
         Workload::Gups { threads, .. } | Workload::AllocTest { threads, .. } | Workload::Stream { threads } => *threads,
         _ => 1,
     };
@@ -879,6 +893,16 @@ where
                     ushell.run(cmd!("sudo tune2fs -O ^metadata_csum /dev/pmem0"))?;
                 }
                 ushell.run(cmd!("sudo mount -o dax /dev/pmem0 daxtmp/"))?;
+            }
+            MMFS::BasicMMFS { num_pages } => {
+                ushell.run(cmd!(
+                    "sudo insmod {}/BasicMMFS/basicmmfs.ko",
+                    crate::KERNEL_PATH
+                ))?;
+                ushell.run(cmd!(
+                    "sudo mount -t BasicMMFS BasicMMFS -o numpages={} daxtmp/",
+                    num_pages,
+                ))?;
             }
             MMFS::TieredMMFS { .. } => {
                 ushell.run(cmd!(
@@ -1124,11 +1148,13 @@ where
 
         w @ Workload::Spec2017Mcf
         | w @ Workload::Spec2017Xz { size: _ }
-        | w @ Workload::Spec2017Xalancbmk => {
+        | w @ Workload::Spec2017Xalancbmk
+        | w @ Workload::Spec2017CactuBSSN => {
             let wkload = match w {
                 Workload::Spec2017Mcf => Spec2017Workload::Mcf,
                 Workload::Spec2017Xz { size } => Spec2017Workload::Xz { size },
                 Workload::Spec2017Xalancbmk => Spec2017Workload::Xalancbmk,
+                Workload::Spec2017CactuBSSN => Spec2017Workload::CactuBSSN,
                 _ => unreachable!(),
             };
 
