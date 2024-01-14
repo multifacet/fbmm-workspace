@@ -23,6 +23,7 @@ struct mmap_info_t {
 };
 
 BPF_PERF_OUTPUT(mmap_events);
+BPF_PERF_OUTPUT(brk_events);
 
 static bool strequals(char *s1, char *s2, u32 len) {
     for (u32 i = 0; i < len; i++) {
@@ -64,6 +65,28 @@ int mmap_call(struct pt_regs *ctx, struct file *f, u64 addr, u64 len) {
 
 	return 0;
 }
+
+int brk_call(struct pt_regs *ctx, void *mas, struct vm_area_struct *vma, u64 addr, u64 len) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tgid = pid_tgid & 0xFFFFFFFF;
+    char comm[TASK_COMM_LEN];
+    char target[TASK_COMM_LEN] = "TARGET_COMM";
+    struct mmap_info_t info;
+
+    bpf_get_current_comm(&comm, sizeof(comm));
+    if (FILTER_PROC)
+        return 0;
+
+    info.len = len;
+    info.pid = pid;
+    info.tgid = tgid;
+    bpf_get_current_comm(&info.comm, sizeof(info.comm));
+
+    brk_events.perf_submit(ctx, &info, sizeof(info));
+
+    return 0;
+}
 """
 
 # Do code substitution for the process filtering
@@ -78,18 +101,25 @@ else:
 
 b = BPF(text=bpf_text)
 b.attach_kprobe(event="do_mmap", fn_name="mmap_call")
+b.attach_kprobe(event="do_brk_flags", fn_name="brk_call")
 
-header_string = "%-10.10s,%-6s,%-6s,%-14s"
-format_string = "%-10.10s,%-6d,%-6d,%-14d"
-print(header_string % ("COMM", "PID", "TGID", "MMAP_LEN"))
+header_string = "%-10.10s,%-9s,%-6s,%-6s,%-14s"
+format_string = "%-10.10s,%-9s,%-6d,%-6d,%-14d"
+print(header_string % ("COMM", "MMAP/BRK","PID", "TGID", "MMAP_LEN"))
 
 def handle_mmap_event(cpu, data, size):
 	event = b["mmap_events"].event(data)
 
-	print(format_string % (event.comm, event.pid, event.tgid, event.len))
+	print(format_string % (event.comm, "MMAP", event.pid, event.tgid, event.len))
+	sys.stdout.flush()
+def handle_brk_event(cpu, data, size):
+	event = b["brk_events"].event(data)
+
+	print(format_string % (event.comm, "BRK", event.pid, event.tgid, event.len))
 	sys.stdout.flush()
 
 b["mmap_events"].open_perf_buffer(handle_mmap_event)
+b["brk_events"].open_perf_buffer(handle_brk_event)
 
 while not os.path.isfile("/tmp/stop_mmap_tracker"):
     try:
