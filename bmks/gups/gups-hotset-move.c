@@ -314,23 +314,23 @@ int main(int argc, char **argv)
 
   // run through gups once to touch all memory
   // spawn gups worker threads
-  for (i = 0; i < threads; i++) {
-    int r = pthread_create(&t[i], NULL, do_gups, (void*)ga[i]);
-    assert(r == 0);
-  }
-
-  // wait for worker threads
-  for (i = 0; i < threads; i++) {
-    int r = pthread_join(t[i], NULL);
-    assert(r == 0);
-  }
-  //hemem_print_stats();
-
-  gettimeofday(&stoptime, NULL);
-
-  secs = elapsed(&starttime, &stoptime);
-  //printf("Elapsed time: %.4f seconds.\n", secs);
-  gups = threads * ((double)updates) / (secs * 1.0e9);
+//  for (i = 0; i < threads; i++) {
+//    int r = pthread_create(&t[i], NULL, do_gups, (void*)ga[i]);
+//    assert(r == 0);
+//  }
+//
+//  // wait for worker threads
+//  for (i = 0; i < threads; i++) {
+//    int r = pthread_join(t[i], NULL);
+//    assert(r == 0);
+//  }
+//  //hemem_print_stats();
+//
+//  gettimeofday(&stoptime, NULL);
+//
+//  secs = elapsed(&starttime, &stoptime);
+//  //printf("Elapsed time: %.4f seconds.\n", secs);
+//  gups = threads * ((double)updates) / (secs * 1.0e9);
   //printf("GUPS = %.10f\n", gups);
   memset(thread_gups, 0, sizeof(thread_gups));
 
