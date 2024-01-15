@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 #define ADDRESS (0x7f5707200000ul)
 #define PAGE_SHIFT (12)
@@ -12,6 +13,7 @@ unsigned long num_allocations = 1;
 unsigned long num_threads = 1;
 volatile int begin = 0;
 int flags = MAP_ANONYMOUS | MAP_PRIVATE;
+bool touch = false;
 
 static __inline__ unsigned long long rdtsc(void)
 {
@@ -23,7 +25,8 @@ static __inline__ unsigned long long rdtsc(void)
 void *map_thread(void *ptr) {
 	unsigned long long start, end;
 	unsigned long long map_time = 0;
-	void **addr = (void**) ptr;
+	char **addr = (char**) ptr;
+    int num_pages = size >> PAGE_SHIFT;
 
 	while (!begin) {}
 
@@ -31,6 +34,12 @@ void *map_thread(void *ptr) {
 		start = rdtsc();
 		addr[i] = mmap(NULL, size, PROT_WRITE | PROT_READ,
 			flags, -1, 0);
+
+        if (touch) {
+            for (int j = 0; j < num_pages; j++) {
+                addr[i][j << PAGE_SHIFT] = 0;
+            }
+        }
 		end = rdtsc();
 
 		map_time += end - start;
@@ -75,7 +84,10 @@ int main(int argc, char *argv[]) {
 		num_threads = strtoul(argv[3], NULL, 10);
 	}
 	if (argc >= 5) {
-		flags |= MAP_POPULATE;
+        if (argv[4][0] == 't')
+            touch = true;
+        else
+		    flags |= MAP_POPULATE;
 	}
 
 	size = strtoul(argv[1], NULL, 10);
