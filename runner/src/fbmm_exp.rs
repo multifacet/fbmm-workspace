@@ -43,6 +43,7 @@ enum Workload {
         num_allocs: usize,
         threads: usize,
         populate: bool,
+        touch: bool,
     },
     Gups {
         threads: usize,
@@ -162,6 +163,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
              "The number of threads to run alloctest with")
             (@arg POPULATE: --populate
              "Run alloctest where regions are MMAPed with the MAP_POPULATE flag")
+            (@arg TOUCH: --touch
+             "Manually fault in every page by touching it.")
         )
         (@subcommand canneal =>
             (about: "Run the canneal workload.")
@@ -353,7 +356,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .parse::<usize>()
                 .unwrap();
             let populate = sub_m.is_present("POPULATE");
-            Workload::AllocTest { size, num_allocs, threads, populate }
+            let touch = sub_m.is_present("TOUCH");
+            Workload::AllocTest { size, num_allocs, threads, populate, touch }
         }
 
         ("canneal", Some(sub_m)) => {
@@ -1132,7 +1136,7 @@ where
     };
 
     match cfg.workload {
-        Workload::AllocTest { size, num_allocs, threads, populate } => {
+        Workload::AllocTest { size, num_allocs, threads, populate, touch } => {
             time!(timers, "Workload", {
                 run_alloc_test(
                     &ushell,
@@ -1145,6 +1149,7 @@ where
                     &runtime_file,
                     &pin_cores_str,
                     populate,
+                    touch,
                 )?;
             });
         }
@@ -1394,9 +1399,10 @@ fn run_alloc_test(
     runtime_file: &str,
     pin_cores_str: &str,
     use_map_populate: bool,
+    touch_pages: bool,
 ) -> Result<(), failure::Error> {
     // alloc_test uses MAP_POPULATE if it has a fourth arg
-    let populate_arg = if use_map_populate { "populate" } else { "" };
+    let populate_arg = if use_map_populate { "populate" } else if touch_pages { "t" } else { "" };
 
     let start = Instant::now();
     ushell.run(
