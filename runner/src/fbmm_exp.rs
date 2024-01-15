@@ -113,6 +113,7 @@ struct Config {
     lock_stat: bool,
     fbmm: Option<MMFS>,
     tpp: bool,
+    hmsdk: bool,
     dram_region: Option<MemRegion>,
     pmem_region: Option<MemRegion>,
     node_weights: Vec<NodeWeight>,
@@ -269,6 +270,9 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg TPP: --tpp
          requires[DRAM_SIZE] conflicts_with[FBMM] conflicts_with[HUGETLB]
          "Run the workload with TPP.")
+        (@arg HMSDK: --hmsdk
+         requires[NODE_WEIGHT]
+         "Run the workload using HMSDK bandwidth expansion.")
         (@group MMFS_TYPE =>
             (@attributes requires[FBMM])
             (@arg EXT4: --ext4
@@ -295,7 +299,6 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "If passed, specifies the starting point of the reserved PMEM in GB. \
          Default is dram_size + dram_start.")
         (@arg NODE_WEIGHT: --node_weight +takes_value ... number_of_values(1)
-         requires[BWMMFS]
          "The node weights to use when using BWMMFS. Taken in the form of \"<nid>:<weight>\". \
          The default node weight is 1.")
         (@arg MIGRATE_TASK_INT: --migrate_task_int +takes_value {validator::is::<usize>}
@@ -494,6 +497,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         }
     });
     let tpp = sub_m.is_present("TPP");
+    let hmsdk = sub_m.is_present("HMSDK");
     let dram_region = sub_m.is_present("DRAM_SIZE").then(|| {
         let dram_size = sub_m
             .value_of("DRAM_SIZE")
@@ -595,6 +599,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         lock_stat,
         fbmm,
         tpp,
+        hmsdk,
         dram_region,
         pmem_region,
         node_weights,
@@ -869,6 +874,18 @@ where
         cmd_prefix.push_str("numactl --membind=0 ");
     }
 
+    if cfg.hmsdk {
+        let mut numactl_weights: String = String::new();
+        for weight in &cfg.node_weights {
+            numactl_weights = format!("{},{}*{}", numactl_weights, weight.nid, weight.weight);
+        }
+        // Get rid of leading comma
+        let numactl_weights_str = &numactl_weights[1..];
+
+        let numactl_string = format!("~/hmsdk/numactl/numactl --interleave-weight={} ", numactl_weights_str);
+        cmd_prefix.push_str(&numactl_string);
+    }
+
     if cfg.lock_stat {
         // Enable collection of statistic
         ushell.run(cmd!("echo 1 | sudo tee /proc/sys/kernel/lock_stat"))?;
@@ -978,7 +995,7 @@ where
                 period
             ))?;
         }
-    } else {
+    } else if cfg.fbmm.is_some() {
         // These options are not in the TPP kernel
         if let Some(fault_size) = &cfg.pte_fault_size {
             ushell.run(cmd!(

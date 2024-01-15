@@ -46,6 +46,9 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "(Optional) If passed, clone the specified branch name. If not pased, master is used. \
          requires --clone_wkspc.")
 
+        (@arg HMSDK: --hmsdk
+         "(Optional) If passed, clone the HMSDK utilities.")
+
         (@arg SECRET: +takes_value --secret
          "(Optional) If we should clone the workspace, this is the Github personal access \
           token or password for cloning the repo.")
@@ -91,6 +94,8 @@ where
     host_bmks: bool,
     /// Should we install SPEC 2017? If so, what is the ISO path?
     spec_2017: Option<&'a str>,
+    /// Should we install HMSDK utilities
+    hmsdk: bool,
 
     /// Set jemalloc as the default system allocator.
     jemalloc: bool,
@@ -116,6 +121,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
     let host_bmks = sub_m.is_present("HOST_BMKS");
     let spec_2017 = sub_m.value_of("SPEC_2017");
+    let hmsdk = sub_m.is_present("HMSDK");
 
     let jemalloc = sub_m.is_present("JEMALLOC");
 
@@ -131,6 +137,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         secret,
         host_bmks,
         spec_2017,
+        hmsdk,
         jemalloc,
     };
 
@@ -173,6 +180,20 @@ where
         );
         let config = "spec-linux-x86.cfg";
         install_spec_2017(&ushell, &cfg.login, iso_path, &config, &spec_path)?;
+    }
+
+    if cfg.hmsdk {
+        let hmsdk_repo = GitRepo::HttpsPublic {
+            repo: "github.com/skhynix/hmsdk/",
+        };
+        clone_git_repo(&ushell, hmsdk_repo, Some("hmsdk"), Some("main"), None, &["numactl"])?;
+        let numactl_dir = dir!("hmsdk/numactl/");
+
+        with_shell! { ushell in &numactl_dir =>
+            cmd!("./autogen.sh"),
+            cmd!("./configure"),
+            cmd!("make"),
+        }
     }
 
     ushell.run(cmd!("echo DONE"))?;
