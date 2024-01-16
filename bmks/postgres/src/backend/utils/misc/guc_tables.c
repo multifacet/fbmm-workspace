@@ -365,6 +365,7 @@ static const struct config_enum_entry huge_pages_options[] = {
 	{"no", HUGE_PAGES_OFF, true},
 	{"1", HUGE_PAGES_ON, true},
 	{"0", HUGE_PAGES_OFF, true},
+	{"fbmm", FBMM_ON, false},
 	{NULL, 0, false}
 };
 

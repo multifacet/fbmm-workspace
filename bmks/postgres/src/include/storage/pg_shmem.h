@@ -53,6 +53,7 @@ typedef enum
 	HUGE_PAGES_ON,
 	HUGE_PAGES_TRY,				/* only for huge_pages */
 	HUGE_PAGES_UNKNOWN,			/* only for huge_pages_status */
+	FBMM_ON,				/* Use FBMM memory */
 }			HugePagesType;
 
 /* Possible values for shared_memory_type */

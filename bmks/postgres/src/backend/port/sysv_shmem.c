@@ -26,6 +26,9 @@
 #include <sys/mman.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
 
 #include "miscadmin.h"
 #include "port/pg_bitutils.h"
@@ -627,6 +630,32 @@ CreateAnonymousSegment(Size *size)
 	}
 #endif
 
+	if (huge_pages == FBMM_ON) {
+		int fd = open("/users/bijan/daxtmp/", O_RDWR | O_TMPFILE, 0777);
+		int ret;
+		Size pagesize = 4096;
+
+		if (fd == -1) {
+			mmap_errno = errno;
+			elog(FATAL, "Failed to create FBMM file %s\n", strerror(mmap_errno));
+			return ptr;
+		}
+
+		// Round the size to the page size
+		if (allocsize % pagesize != 0)
+			allocsize += pagesize - (allocsize % pagesize);
+
+		ret = ftruncate(fd, allocsize);
+		if (fd == -1) {
+			mmap_errno = errno;
+			elog(FATAL, "Failed to truncate FBMM file %s\n", strerror(mmap_errno));
+			return ptr;
+		}
+
+		ptr = mmap(NULL, allocsize, PROT_READ | PROT_WRITE,
+					PG_MMAP_FLAGS, fd, 0);
+	}
+
 	/*
 	 * Report whether huge pages are in use.  This needs to be tracked before
 	 * the second mmap() call if attempting to use huge pages failed
@@ -635,7 +664,7 @@ CreateAnonymousSegment(Size *size)
 	SetConfigOption("huge_pages_status", (ptr == MAP_FAILED) ? "off" : "on",
 					PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 
-	if (ptr == MAP_FAILED && huge_pages != HUGE_PAGES_ON)
+	if (ptr == MAP_FAILED && huge_pages != HUGE_PAGES_ON && huge_pages != FBMM_ON)
 	{
 		/*
 		 * Use the original size, not the rounded-up value, when falling back
