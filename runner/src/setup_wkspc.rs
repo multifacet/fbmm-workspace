@@ -230,6 +230,8 @@ fn install_host_dependencies(ushell: &SshShell) -> Result<(), failure::Error> {
             "libhugetlbfs-bin",
             "maven",
             "mpich",
+            "libicu-dev",
+            "libreadline-dev",
         ]),
     };
 
@@ -306,6 +308,18 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
         cmd!("sed -i 's/LDFLAGS = -lpthread/LDFLAGS = -pthread/g' ./Makefile").cwd(&graph500_dir),
     )?;
     ushell.run(cmd!("make").cwd(graph500_dir))?;
+
+    // Postgres
+    let postgres_dir = dir!(
+        crate::RESEARCH_WORKSPACE_PATH,
+        crate::BMKS_PATH,
+        "postgres"
+    );
+    with_shell! { ushell in &postgres_dir =>
+        cmd!("./configure"),
+        cmd!("make"),
+        cmd!("sudo make install"),
+    }
 
     Ok(())
 }

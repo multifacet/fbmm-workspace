@@ -6,11 +6,11 @@ use libscail::{
     output::{Parametrize, Timestamp},
     set_kernel_printk_level, time, validator,
     workloads::{
-        gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig,
+        gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig, PostgresWorkloadConfig,
         Spec2017Workload, TasksetCtxBuilder, TasksetCtxInterleaving, YcsbConfig, YcsbDistribution,
         YcsbSession, YcsbSystem, YcsbWorkload,
     },
-    Login,
+    Login, ScailError,
 };
 
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,9 @@ enum Workload {
         op_count: usize,
         read_prop: f32,
         update_prop: f32,
+    },
+    Postgres {
+        op_count: usize,
     },
     Graph500 {
         size: usize,
@@ -224,6 +227,12 @@ pub fn cli_options() -> clap::App<'static, 'static> {
             (@arg UPDATE_PROP: --update_prop +takes_value {validator::is::<f32>}
              "The proportion of read operations to perform as a value between 0 and 1.\
              The default is 0.5. The proportion on insert operations will be 1 - read_prop - update_prop")
+        )
+        (@subcommand postgres =>
+            (about: "Run the postgres workload driven by YCSB")
+            (@arg OP_COUNT: --op_count +takes_value {validator::is::<usize>}
+             "The number of operations to perform during the workload.\
+             The default is 1000.")
         )
         (@subcommand graph500 =>
             (about: "Run the Graph500 workload")
@@ -451,6 +460,18 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             }
         }
 
+        ("postgres", Some(sub_m)) => {
+            let op_count = sub_m
+                .value_of("OP_COUNT")
+                .unwrap_or("1000")
+                .parse::<usize>()
+                .unwrap();
+
+            Workload::Postgres {
+                op_count,
+            }
+        }
+
         ("graph500", Some(sub_m)) => {
             let size = sub_m.value_of("SIZE").unwrap().parse::<usize>().unwrap();
 
@@ -633,6 +654,11 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     run_inner(&login, &cfg)
 }
 
+fn empty_func(_: &SshShell) -> Result<(), ScailError>
+{
+    Ok(())
+}
+
 fn run_inner<A>(login: &Login<A>, cfg: &Config) -> Result<(), failure::Error>
 where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
@@ -673,6 +699,7 @@ where
     let coherence_dir = dir!(&bmks_dir, "pagewalk_coherence/");
     let ycsb_dir = dir!(&bmks_dir, "YCSB");
     let memcached_dir = dir!(&bmks_dir, "memcached/");
+    let postgres_dir = "/usr/local/pgsql/bin/";
     let graph500_dir = dir!(&bmks_dir, "graph500/src/");
     let scripts_dir = dir!(
         &user_home,
@@ -681,6 +708,7 @@ where
     );
     let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
+    let postgres_db_dir = dir!(&user_home, "pgtmp");
 
     // Setup the pmem settings in the grub config before rebooting
     // First, clear the memmap and tpp options from the boot options
@@ -750,6 +778,7 @@ where
         Workload::Gups { .. } => "gups",
         Workload::PagewalkCoherence { .. } => "paging",
         Workload::Memcached { .. } => "memcached",
+        Workload::Postgres { .. } => "postgres",
         Workload::Graph500 { .. } => "graph500_refere",
         Workload::Stream { .. } => "stream",
     };
@@ -779,7 +808,7 @@ where
     }
 
     let mut tctx = match &cfg.workload {
-        Workload::Memcached { .. } | Workload::Gups { .. } |Workload::Stream { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+        Workload::Memcached { .. } | Workload::Postgres { .. } | Workload::Gups { .. } | Workload::Stream { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
             .numa_interleaving(TasksetCtxInterleaving::Sequential)
             .skip_hyperthreads(true)
             .build(),
@@ -899,8 +928,8 @@ where
 
     if let Some(fs) = &cfg.fbmm {
         cmd_prefix.push_str(&format!(
-            "sudo {}/fbmm_wrapper \"{}/daxtmp/\" ",
-            bmks_dir, user_home
+            "{}/fbmm_wrapper \"{}/daxtmp/\" ",
+            bmks_dir, &user_home
         ));
 
         // Set up the remote for FOM
@@ -1065,57 +1094,101 @@ where
         None
     };
 
-    let ycsb = if let Workload::Memcached {
-        size,
-        op_count,
-        read_prop,
-        update_prop,
-    } = cfg.workload
-    {
-        // Empirically, this is the amount of bytes a single record takes
-        const RECORD_SIZE: usize = 1350;
-        // "size" is the size in GB on the cache, so take off a GB to add some wiggle room
-        let record_count = ((size - 1) << 30) / RECORD_SIZE;
-        let client_pin_core = if let Ok(core) = tctx.next() {
-            Some(core)
-        } else {
-            None
-        };
-        let memcached_cfg = MemcachedWorkloadConfig {
-            user: &login.username,
-            memcached: &memcached_dir,
-            server_size_mb: size << 10,
-            wk_size_gb: size,
-            output_file: None,
-            pintool: None,
-            cmd_prefix: Some(&cmd_prefix),
-            mmu_perf: None,
-            server_start_cb: |_| Ok(()),
-            allow_oom: true,
-            hugepages: !cfg.disable_thp,
-            server_pin_core: Some(pin_cores[0]),
-        };
-        let ycsb_cfg = YcsbConfig {
-            workload: YcsbWorkload::Custom {
-                record_count,
-                op_count,
-                distribution: YcsbDistribution::Zipfian,
-                read_prop,
-                update_prop,
-                insert_prop: 1.0 - read_prop - update_prop,
-            },
-            system: YcsbSystem::Memcached(memcached_cfg),
-            client_pin_core: client_pin_core,
-            ycsb_path: &ycsb_dir,
-            ycsb_result_file: Some(&ycsb_file),
-        };
-        let mut ycsb = YcsbSession::new(ycsb_cfg);
+    let ycsb = match cfg.workload {
+        Workload::Memcached {
+            size,
+            op_count,
+            read_prop,
+            update_prop,
+        } => {
+            // Empirically, this is the amount of bytes a single record takes
+            const RECORD_SIZE: usize = 1350;
+            // "size" is the size in GB on the cache, so take off a GB to add some wiggle room
+            let record_count = ((size - 1) << 30) / RECORD_SIZE;
+            let client_pin_core = if let Ok(core) = tctx.next() {
+                Some(core)
+            } else {
+                None
+            };
+            let memcached_cfg = MemcachedWorkloadConfig {
+                user: &login.username,
+                memcached: &memcached_dir,
+                server_size_mb: size << 10,
+                wk_size_gb: size,
+                output_file: None,
+                pintool: None,
+                cmd_prefix: Some(&cmd_prefix),
+                mmu_perf: None,
+                server_start_cb: empty_func,
+                allow_oom: true,
+                hugepages: !cfg.disable_thp,
+                server_pin_core: Some(pin_cores[0]),
+            };
+            let ycsb_cfg = YcsbConfig {
+                workload: YcsbWorkload::Custom {
+                    record_count,
+                    op_count,
+                    distribution: YcsbDistribution::Zipfian,
+                    read_prop,
+                    update_prop,
+                    insert_prop: 1.0 - read_prop - update_prop,
+                },
+                system: YcsbSystem::Memcached(memcached_cfg),
+                client_pin_core: client_pin_core,
+                ycsb_path: &ycsb_dir,
+                ycsb_result_file: Some(&ycsb_file),
+            };
+            let mut ycsb = YcsbSession::new(ycsb_cfg);
+    
+            ycsb.start_and_load(&ushell)?;
+    
+            Some(ycsb)
+        }
+        Workload::Postgres { op_count } =>  {
+            let client_pin_core = if let Ok(core) = tctx.next() {
+                Some(core)
+            } else {
+                None
+            };
+            let postgres_options = if cfg.fbmm.is_some() {
+                Some(" -c huge_pages=fbmm ")
+            } else {
+                None
+            };
 
-        ycsb.start_and_load(&ushell)?;
+            let postgres_cfg = PostgresWorkloadConfig {
+                postgres_path: postgres_dir,
+                db_dir: &postgres_db_dir,
+                tmpfs_size: Some(60),
+                user: &login.username,
+                server_pin_core: Some(pin_cores[0]),
+                pintool: None,
+                cmd_prefix: Some(&cmd_prefix),
+                postgres_options,
+                mmu_perf: None,
+                server_start_cb: empty_func,
+            };
+            let ycsb_cfg = YcsbConfig {
+                workload: YcsbWorkload::Custom {
+                    record_count: 15000000,
+                    op_count,
+                    distribution: YcsbDistribution::Zipfian,
+                    read_prop: 1.0,
+                    update_prop: 0.0,
+                    insert_prop: 0.0,
+                },
+                system: YcsbSystem::Postgres(postgres_cfg),
+                client_pin_core,
+                ycsb_path: &ycsb_dir,
+                ycsb_result_file: Some(&ycsb_file),
+            };
+            let mut ycsb = YcsbSession::new(ycsb_cfg);
 
-        Some(ycsb)
-    } else {
-        None
+            ycsb.start_and_load(&ushell)?;
+
+            Some(ycsb)
+        }
+        _ => None
     };
 
     // Start the mm_fault_tracker BPF script if requested
@@ -1242,6 +1315,21 @@ where
             while let Ok(..) = ushell.run(cmd!(
                 "{}/scripts/memcached-tool localhost:11211",
                 memcached_dir
+            )) {}
+            std::thread::sleep(std::time::Duration::from_secs(20));
+        }
+
+        Workload::Postgres { .. } => {
+            let mut ycsb = ycsb.unwrap();
+
+            //Run the workload
+            time!(timers, "Workload", ycsb.run(&ushell))?;
+
+            // Make sure the server dies.
+            ushell.run(cmd!("sudo pkill -INT postgres"))?;
+            while let Ok(..) = ushell.run(cmd!(
+                "{}/pg_isready",
+                postgres_dir
             )) {}
             std::thread::sleep(std::time::Duration::from_secs(20));
         }
