@@ -186,7 +186,14 @@ where
         let hmsdk_repo = GitRepo::HttpsPublic {
             repo: "github.com/skhynix/hmsdk/",
         };
-        clone_git_repo(&ushell, hmsdk_repo, Some("hmsdk"), Some("main"), None, &["numactl"])?;
+        clone_git_repo(
+            &ushell,
+            hmsdk_repo,
+            Some("hmsdk"),
+            Some("main"),
+            None,
+            &["numactl"],
+        )?;
         let numactl_dir = dir!("hmsdk/numactl/");
 
         with_shell! { ushell in &numactl_dir =>
@@ -310,11 +317,7 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     ushell.run(cmd!("make").cwd(graph500_dir))?;
 
     // Postgres
-    let postgres_dir = dir!(
-        crate::RESEARCH_WORKSPACE_PATH,
-        crate::BMKS_PATH,
-        "postgres"
-    );
+    let postgres_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "postgres");
     with_shell! { ushell in &postgres_dir =>
         cmd!("./configure"),
         cmd!("make"),

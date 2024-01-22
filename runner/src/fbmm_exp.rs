@@ -6,9 +6,9 @@ use libscail::{
     output::{Parametrize, Timestamp},
     set_kernel_printk_level, time, validator,
     workloads::{
-        gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig, PostgresWorkloadConfig,
-        Spec2017Workload, TasksetCtxBuilder, TasksetCtxInterleaving, YcsbConfig, YcsbDistribution,
-        YcsbSession, YcsbSystem, YcsbWorkload,
+        gen_perf_command_prefix, run_canneal, run_spec17, CannealWorkload, MemcachedWorkloadConfig,
+        PostgresWorkloadConfig, Spec2017Workload, TasksetCtxBuilder, TasksetCtxInterleaving,
+        YcsbConfig, YcsbDistribution, YcsbSession, YcsbSystem, YcsbWorkload,
     },
     Login, ScailError,
 };
@@ -81,9 +81,7 @@ struct MemRegion {
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum MMFS {
     Ext4,
-    BasicMMFS {
-        num_pages: usize,
-    },
+    BasicMMFS { num_pages: usize },
     TieredMMFS,
     ContigMMFS,
     BandwidthMMFS,
@@ -366,7 +364,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .unwrap();
             let populate = sub_m.is_present("POPULATE");
             let touch = sub_m.is_present("TOUCH");
-            Workload::AllocTest { size, num_allocs, threads, populate, touch }
+            Workload::AllocTest {
+                size,
+                num_allocs,
+                threads,
+                populate,
+                touch,
+            }
         }
 
         ("canneal", Some(sub_m)) => {
@@ -467,9 +471,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
                 .parse::<usize>()
                 .unwrap();
 
-            Workload::Postgres {
-                op_count,
-            }
+            Workload::Postgres { op_count }
         }
 
         ("graph500", Some(sub_m)) => {
@@ -508,9 +510,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             MMFS::Ext4
         } else if let Some(num_pages_str) = sub_m.value_of("BASICMMFS") {
             let num_pages = num_pages_str.parse::<usize>().unwrap();
-            MMFS::BasicMMFS {
-                num_pages,
-            }
+            MMFS::BasicMMFS { num_pages }
         } else if sub_m.is_present("TIEREDMMFS") {
             MMFS::TieredMMFS
         } else if sub_m.is_present("CONTIGMMFS") {
@@ -654,8 +654,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     run_inner(&login, &cfg)
 }
 
-fn empty_func(_: &SshShell) -> Result<(), ScailError>
-{
+fn empty_func(_: &SshShell) -> Result<(), ScailError> {
     Ok(())
 }
 
@@ -808,14 +807,19 @@ where
     }
 
     let mut tctx = match &cfg.workload {
-        Workload::Memcached { .. } | Workload::Postgres { .. } | Workload::Gups { .. } | Workload::Stream { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
+        Workload::Memcached { .. }
+        | Workload::Postgres { .. }
+        | Workload::Gups { .. }
+        | Workload::Stream { .. } => TasksetCtxBuilder::from_lscpu(&ushell)?
             .numa_interleaving(TasksetCtxInterleaving::Sequential)
             .skip_hyperthreads(true)
             .build(),
-        Workload::AllocTest { .. } | Workload::Spec2017CactuBSSN => TasksetCtxBuilder::from_lscpu(&ushell)?
-            .numa_interleaving(TasksetCtxInterleaving::Sequential)
-            .skip_hyperthreads(false)
-            .build(),
+        Workload::AllocTest { .. } | Workload::Spec2017CactuBSSN => {
+            TasksetCtxBuilder::from_lscpu(&ushell)?
+                .numa_interleaving(TasksetCtxInterleaving::Sequential)
+                .skip_hyperthreads(false)
+                .build()
+        }
         _ => {
             let cores = libscail::get_num_cores(&ushell)?;
             TasksetCtxBuilder::simple(cores).build()
@@ -826,7 +830,9 @@ where
     let num_pin_cores = match &cfg.workload {
         Workload::Spec2017Mcf | Workload::Spec2017Xz { .. } | Workload::Spec2017Xalancbmk => 4,
         Workload::Spec2017CactuBSSN => 16,
-        Workload::Gups { threads, .. } | Workload::AllocTest { threads, .. } | Workload::Stream { threads } => *threads,
+        Workload::Gups { threads, .. }
+        | Workload::AllocTest { threads, .. }
+        | Workload::Stream { threads } => *threads,
         _ => 1,
     };
     let mut pin_cores = Vec::<usize>::new();
@@ -915,7 +921,10 @@ where
         // Get rid of leading comma
         let numactl_weights_str = &numactl_weights[1..];
 
-        let numactl_string = format!("~/hmsdk/numactl/numactl --interleave-weight={} ", numactl_weights_str);
+        let numactl_string = format!(
+            "~/hmsdk/numactl/numactl --interleave-weight={} ",
+            numactl_weights_str
+        );
         cmd_prefix.push_str(&numactl_string);
     }
 
@@ -1139,12 +1148,12 @@ where
                 ycsb_result_file: Some(&ycsb_file),
             };
             let mut ycsb = YcsbSession::new(ycsb_cfg);
-    
+
             ycsb.start_and_load(&ushell)?;
-    
+
             Some(ycsb)
         }
-        Workload::Postgres { op_count } =>  {
+        Workload::Postgres { op_count } => {
             let client_pin_core = if let Ok(core) = tctx.next() {
                 Some(core)
             } else {
@@ -1188,7 +1197,7 @@ where
 
             Some(ycsb)
         }
-        _ => None
+        _ => None,
     };
 
     // Start the mm_fault_tracker BPF script if requested
@@ -1209,7 +1218,13 @@ where
     };
 
     match cfg.workload {
-        Workload::AllocTest { size, num_allocs, threads, populate, touch } => {
+        Workload::AllocTest {
+            size,
+            num_allocs,
+            threads,
+            populate,
+            touch,
+        } => {
             time!(timers, "Workload", {
                 run_alloc_test(
                     &ushell,
@@ -1327,10 +1342,7 @@ where
 
             // Make sure the server dies.
             ushell.run(cmd!("sudo pkill -INT postgres"))?;
-            while let Ok(..) = ushell.run(cmd!(
-                "{}/pg_isready",
-                postgres_dir
-            )) {}
+            while let Ok(..) = ushell.run(cmd!("{}/pg_isready", postgres_dir)) {}
             std::thread::sleep(std::time::Duration::from_secs(20));
         }
 
@@ -1364,7 +1376,10 @@ where
 
     // If we are using FBMM, print some stats
     if let Some(fs) = &cfg.fbmm {
-        ushell.run(cmd!("cat /sys/kernel/mm/fbmm/stats | tee {}", &fbmm_stats_file))?;
+        ushell.run(cmd!(
+            "cat /sys/kernel/mm/fbmm/stats | tee {}",
+            &fbmm_stats_file
+        ))?;
 
         match fs {
             // If we are using TieredMMFS, print some more stats
@@ -1490,7 +1505,13 @@ fn run_alloc_test(
     touch_pages: bool,
 ) -> Result<(), failure::Error> {
     // alloc_test uses MAP_POPULATE if it has a fourth arg
-    let populate_arg = if use_map_populate { "populate" } else if touch_pages { "t" } else { "" };
+    let populate_arg = if use_map_populate {
+        "populate"
+    } else if touch_pages {
+        "t"
+    } else {
+        ""
+    };
 
     let start = Instant::now();
     ushell.run(
