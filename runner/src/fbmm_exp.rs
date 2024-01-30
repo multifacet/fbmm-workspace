@@ -114,6 +114,7 @@ struct Config {
     tmmfs_active_list_periodic: bool,
     lock_stat: bool,
     fbmm: Option<MMFS>,
+    fbmm_control: bool,
     tpp: bool,
     hmsdk: bool,
     dram_region: Option<MemRegion>,
@@ -277,6 +278,9 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg FBMM: --fbmm
          requires[MMFS_TYPE] conflicts_with[TPP] conflicts_with[HUGETLB]
          "Run the workload with file based mm with the specified FS (either ext4 or TieredMMFS).")
+        (@arg FBMM_CONTROL: --fbmm_control
+         requires[FBMM]
+         "Use FBMM in control mode")
         (@arg TPP: --tpp
          requires[DRAM_SIZE] conflicts_with[FBMM] conflicts_with[HUGETLB]
          "Run the workload with TPP.")
@@ -521,6 +525,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
             panic!("Invalid MM file system. Use either --ext4 or --tieredmmfs");
         }
     });
+    let fbmm_control = sub_m.is_present("FBMM_CONTROL");
     let tpp = sub_m.is_present("TPP");
     let hmsdk = sub_m.is_present("HMSDK");
     let dram_region = sub_m.is_present("DRAM_SIZE").then(|| {
@@ -623,6 +628,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         badger_trap,
         lock_stat,
         fbmm,
+        fbmm_control,
         tpp,
         hmsdk,
         dram_region,
@@ -936,10 +942,12 @@ where
     }
 
     if let Some(fs) = &cfg.fbmm {
-        cmd_prefix.push_str(&format!(
-            "{}/fbmm_wrapper \"{}/daxtmp/\" ",
-            bmks_dir, &user_home
-        ));
+        if !cfg.fbmm_control {
+            cmd_prefix.push_str(&format!(
+                "{}/fbmm_wrapper \"{}/daxtmp/\" ",
+                bmks_dir, &user_home
+            ));
+        }
 
         // Set up the remote for FOM
         ushell.run(cmd!("mkdir -p ./daxtmp/"))?;
@@ -1179,11 +1187,11 @@ where
             };
             let ycsb_cfg = YcsbConfig {
                 workload: YcsbWorkload::Custom {
-                    record_count: 15000000,
+                    record_count: 1500000,
                     op_count,
                     distribution: YcsbDistribution::Zipfian,
-                    read_prop: 1.0,
-                    update_prop: 0.0,
+                    read_prop: 0.0,
+                    update_prop: 1.0,
                     insert_prop: 0.0,
                 },
                 system: YcsbSystem::Postgres(postgres_cfg),
