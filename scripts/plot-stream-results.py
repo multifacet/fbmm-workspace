@@ -36,10 +36,10 @@ for attr, measurements in throughputs.items():
     plt.bar(x + offset, measurements, width, label=attr)
     multiplier += 1
 
-plt.title("Bandwidth Reported By Stream With BWFSMM", fontsize=24)
+plt.legend(loc='upper left')
+plt.title("Bandwidth Reported By Stream With HMSDK", fontsize=24)
 plt.xticks(x + (1.5 * width), configs, fontsize=18, rotation=0)
 plt.yticks(fontsize=18)
 plt.ylabel("Bandwidth (MB/s)", fontsize=22)
-plt.legend()
 
 plt.show()
