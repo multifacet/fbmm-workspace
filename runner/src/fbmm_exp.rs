@@ -116,7 +116,8 @@ struct Config {
     fbmm: Option<MMFS>,
     fbmm_control: bool,
     tpp: bool,
-    hmsdk: bool,
+    hmsdk_bw: bool,
+    hmsdk_tiered: bool,
     dram_region: Option<MemRegion>,
     pmem_region: Option<MemRegion>,
     node_weights: Vec<NodeWeight>,
@@ -284,9 +285,13 @@ pub fn cli_options() -> clap::App<'static, 'static> {
         (@arg TPP: --tpp
          requires[DRAM_SIZE] conflicts_with[FBMM] conflicts_with[HUGETLB]
          "Run the workload with TPP.")
-        (@arg HMSDK: --hmsdk
-         requires[NODE_WEIGHT]
-         "Run the workload using HMSDK bandwidth expansion.")
+        (@group HMSDK_TYPE =>
+            (@arg HMSDK_BW: --hmsdk_bw
+             requires[NODE_WEIGHT]
+             "Run the workload using HMSDK bandwidth expansion.")
+            (@arg HMSDK_TIERED: --hmsdk_tiered
+             "Run the workload using HMSDK Tiered memory.")
+        )
         (@group MMFS_TYPE =>
             (@attributes requires[FBMM])
             (@arg EXT4: --ext4
@@ -527,7 +532,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
     });
     let fbmm_control = sub_m.is_present("FBMM_CONTROL");
     let tpp = sub_m.is_present("TPP");
-    let hmsdk = sub_m.is_present("HMSDK");
+    let hmsdk_bw = sub_m.is_present("HMSDK_BW");
+    let hmsdk_tiered = sub_m.is_present("HMSDK_TIERED");
     let dram_region = sub_m.is_present("DRAM_SIZE").then(|| {
         let dram_size = sub_m
             .value_of("DRAM_SIZE")
@@ -630,7 +636,8 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         fbmm,
         fbmm_control,
         tpp,
-        hmsdk,
+        hmsdk_bw,
+        hmsdk_tiered,
         dram_region,
         pmem_region,
         node_weights,
@@ -698,6 +705,7 @@ where
     let stream_file = dir!(&results_dir, cfg.gen_file_name("stream"));
     let badger_trap_file = dir!(&results_dir, cfg.gen_file_name("badger_trap"));
     let fbmm_stats_file = dir!(&results_dir, cfg.gen_file_name("fbmm_stats"));
+    let damo_status_file = dir!(&results_dir, cfg.gen_file_name("damo_status"));
 
     let bmks_dir = dir!(&user_home, crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH);
     let gups_dir = dir!(&bmks_dir, "gups/");
@@ -712,6 +720,7 @@ where
         crate::SCRIPTS_PATH
     );
     let spec_dir = dir!(&bmks_dir, crate::SPEC2017_PATH);
+    let hmsdk_dir = dir!(&user_home, "hmsdk");
     let parsec_dir = dir!(&user_home, crate::PARSEC_PATH);
     let postgres_db_dir = dir!(&user_home, "pgtmp");
 
@@ -919,7 +928,7 @@ where
         cmd_prefix.push_str("numactl --membind=0 ");
     }
 
-    if cfg.hmsdk {
+    if cfg.hmsdk_bw {
         let mut numactl_weights: String = String::new();
         for weight in &cfg.node_weights {
             numactl_weights = format!("{},{}*{}", numactl_weights, weight.nid, weight.weight);
@@ -928,10 +937,21 @@ where
         let numactl_weights_str = &numactl_weights[1..];
 
         let numactl_string = format!(
-            "~/hmsdk/numactl/numactl --interleave-weight={} ",
+            "{}/numactl/numactl --interleave-weight={} ",
+            &hmsdk_dir,
             numactl_weights_str
         );
         cmd_prefix.push_str(&numactl_string);
+    }
+
+    if cfg.hmsdk_tiered {
+        // Hard code node 0 as local and node 1 as remote
+        ushell.run(cmd!("sudo {}/tools/gen_config.py -d 0 -c 1 -o hmsdk.json", hmsdk_dir))?;
+
+        ushell.run(cmd!("sudo mkdir -p /sys/fs/cgroup/hmsdk"))?;
+        ushell.run(cmd!("sudo {}/damo/damo start hmsdk.json", hmsdk_dir))?;
+
+        cmd_prefix.push_str("sudo cgexec -g memory:hmsdk ");
     }
 
     if cfg.lock_stat {
@@ -1176,7 +1196,7 @@ where
             let postgres_cfg = PostgresWorkloadConfig {
                 postgres_path: postgres_dir,
                 db_dir: &postgres_db_dir,
-                tmpfs_size: Some(60),
+                tmpfs_size: Some(40),
                 user: &login.username,
                 server_pin_core: Some(pin_cores[0]),
                 pintool: None,
@@ -1426,6 +1446,11 @@ where
     // Record the badger trap stats if needed
     if cfg.badger_trap {
         ushell.run(cmd!("dmesg | tail -n 10 | sudo tee {}", badger_trap_file))?;
+    }
+
+    // Get DAMO stats if we use HMSDK 2.0
+    if cfg.hmsdk_tiered {
+        ushell.run(cmd!("sudo {}/damo/damo status | sudo tee {}", hmsdk_dir, damo_status_file))?;
     }
 
     // Clean up the mm_fault_tracker if it was started
