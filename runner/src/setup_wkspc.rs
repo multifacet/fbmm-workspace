@@ -192,7 +192,7 @@ where
             Some("hmsdk"),
             Some("main"),
             None,
-            &["numactl"],
+            &["numactl", "damo"],
         )?;
         let numactl_dir = dir!("hmsdk/numactl/");
 
@@ -229,7 +229,7 @@ fn install_host_dependencies(ushell: &SshShell) -> Result<(), failure::Error> {
             "redis-server",
             "python2",
             "python3",
-            "python-is-python2",
+            //"python-is-python2",
             "cmake",
             "gfortran",
             "curl",
@@ -239,6 +239,24 @@ fn install_host_dependencies(ushell: &SshShell) -> Result<(), failure::Error> {
             "mpich",
             "libicu-dev",
             "libreadline-dev",
+            "autoconf",
+            "pkgconf",
+            "debhelper",
+            "bison",
+            "flex",
+            "libtool",
+            "systemtap-sdt-dev",
+            "libunwind-dev",
+            "libslang2-dev",
+            "libperl-dev",
+            "python-dev-is-python3",
+            "libzstd-dev",
+            "libcap-dev",
+            "libnuma-dev",
+            "libbabeltrace-dev",
+            "libtraceevent-dev",
+            "libpfm4-dev",
+            "cgroup-tools",
         ]),
     };
 
@@ -314,7 +332,7 @@ fn build_host_benchmarks(ushell: &SshShell) -> Result<(), failure::Error> {
     ushell.run(
         cmd!("sed -i 's/LDFLAGS = -lpthread/LDFLAGS = -pthread/g' ./Makefile").cwd(&graph500_dir),
     )?;
-    ushell.run(cmd!("make").cwd(graph500_dir))?;
+    //ushell.run(cmd!("make").cwd(graph500_dir))?;
 
     // Postgres
     let postgres_dir = dir!(crate::RESEARCH_WORKSPACE_PATH, crate::BMKS_PATH, "postgres");
