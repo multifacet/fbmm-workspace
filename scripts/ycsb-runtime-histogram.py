@@ -21,9 +21,14 @@ for row in reader:
     cmd = row['cmd']
     machine_class = row['class']
 
-    kernel_type = "TPP" if machine_class == "tpp" else "FBMM"
+    if machine_class == "tpp":
+        kernel_type = "TPP"
+    elif machine_class == "hmsdk":
+        kernel_type = "HMSDK"
+    else:
+        kernel_type = "FBMM"
     # False if we are using actual TPP or FBMM, True otherwise
-    using_base_kernel = not (("--tpp" in cmd) or ("--fbmm" in cmd))
+    using_base_kernel = not (("--tpp" in cmd) or ("--fbmm" in cmd) or ("--hmsdk" in cmd))
     did_reserve_mem = "--dram_size" in cmd
 
     experiment_type = kernel_type

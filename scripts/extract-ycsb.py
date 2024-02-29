@@ -16,9 +16,14 @@ filename = json_data['results_path']
 cmd = json_data['cmd']
 machine_class = json_data['class']
 
-kernel_type = "TPP" if machine_class == "tpp" else "FBMM"
+if machine_class == "tpp":
+    kernel_type = "TPP"
+elif machine_class == "hmsdk":
+    kernel_type = "HMSDK"
+else:
+    kernel_type = "FBMM"
 # False if we are using actual TPP or FBMM, True otherwise
-using_base_kernel = not (("--tpp" in cmd) or ("--fbmm" in cmd))
+using_base_kernel = not (("--tpp" in cmd) or ("--fbmm" in cmd) or ("--hmsdk" in cmd))
 did_reserve_mem = "--dram_size" in cmd
 
 experiment_type = kernel_type
@@ -52,7 +57,7 @@ for line in open(filename, "r"):
         runtime = value
     elif "Throughput" in value_name:
         throughput = value
-    elif op_type == "[READ]," and "AverageLatency" in value_name:
+    elif (op_type == "[READ]," or op_type == "[UPDATE],") and "AverageLatency" in value_name:
         latency = value
 
 outdata = {
