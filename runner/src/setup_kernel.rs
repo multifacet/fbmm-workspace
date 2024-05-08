@@ -23,7 +23,7 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "The branch of the repo to clone. Defaults to \"main\"")
         (@arg COMMIT: --commit +takes_value
          "The commit of the repo to change to, if present")
-        (@arg GIT_USER: --git_user +required +takes_value
+        (@arg GIT_USER: --git_user +takes_value
          "The username of the GitHub account to use to clone the kernel")
         (@arg SECRET: --secret +takes_value
          "The GitHub access token to use")
