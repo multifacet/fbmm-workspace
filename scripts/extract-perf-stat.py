@@ -23,7 +23,7 @@ did_reserve_mem = "--dram_size" in cmd
 
 experiment_type = kernel_type
 if using_base_kernel:
-    experiment_type += " Base "
+    experiment_type = "Linux "
     experiment_type += " Split" if did_reserve_mem else " Local"
 
 # Sort is used to group things in google sheets.
