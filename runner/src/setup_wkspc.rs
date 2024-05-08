@@ -259,11 +259,18 @@ where
     A: std::net::ToSocketAddrs + std::fmt::Display + std::fmt::Debug + Clone,
 {
     const SUBMODULES: &[&str] = &["libscail", "bmks/YCSB", "bmks/memcached", "bmks/graph500"];
-    let user = &cfg.git_user.unwrap_or("");
+    const REPO_URL: &str = "github.com/multifacet/fbmm-workspace.git";
+    let git_user = cfg.git_user;
     let branch = cfg.wkspc_branch.unwrap_or("main");
-    let wkspc_repo = GitRepo::HttpsPrivate {
-        repo: "github.com/BijanT/fom-research-workspace.git",
-        username: user,
+    let wkspc_repo = if let Some(user) = &git_user {
+        GitRepo::HttpsPrivate {
+            repo: REPO_URL,
+            username: user,
+        }
+    } else {
+        GitRepo::HttpsPublic {
+            repo: REPO_URL,
+        }
     };
 
     clone_git_repo(

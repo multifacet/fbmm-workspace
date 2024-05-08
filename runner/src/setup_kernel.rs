@@ -21,6 +21,8 @@ pub fn cli_options() -> clap::App<'static, 'static> {
          "The git repo where the kernel is stored.")
         (@arg BRANCH: --branch +takes_value
          "The branch of the repo to clone. Defaults to \"main\"")
+        (@arg COMMIT: --commit +takes_value
+         "The commit of the repo to change to, if present")
         (@arg GIT_USER: --git_user +required +takes_value
          "The username of the GitHub account to use to clone the kernel")
         (@arg SECRET: --secret +takes_value
@@ -46,14 +48,15 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
 
     let repo = sub_m.value_of("REPO").unwrap();
     let branch = sub_m.value_of("BRANCH").unwrap_or("main");
-    let git_user = sub_m.value_of("GIT_USER").unwrap();
+    let commit = sub_m.value_of("COMMIT");
+    let git_user = sub_m.value_of("GIT_USER");
     let secret = sub_m.value_of("SECRET");
     let install_perf = sub_m.is_present("INSTALL_PERF");
     let build_mmfs = sub_m.is_present("BUILD_MMFS");
 
-    let git_repo = if let Some(_secret) = &secret {
+    let git_repo = if let Some(user) = &git_user {
         GitRepo::HttpsPrivate {
-            username: git_user,
+            username: user,
             repo: repo,
         }
     } else {
@@ -84,6 +87,13 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         &[],
     )?;
 
+    let commitish = if let Some(commit_hash) = commit {
+        ushell.run(cmd!("git checkout {}", commit_hash).cwd(&kernel_path))?;
+        (&commit_hash).to_string()
+    } else {
+        (&branch).to_string()
+    };
+
     // Get the base config
     let config = ushell
         .run(cmd!("ls -1 /boot/config-* | head -n1").use_bash())?
@@ -101,7 +111,7 @@ pub fn run(sub_m: &clap::ArgMatches<'_>) -> Result<(), failure::Error> {
         &ushell,
         KernelSrc::Git {
             repo_path: kernel_path.clone(),
-            commitish: (&branch).to_string(),
+            commitish,
         },
         KernelConfig {
             base_config: KernelBaseConfigSource::Path(config.into()),
