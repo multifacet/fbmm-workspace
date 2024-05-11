@@ -8,6 +8,7 @@ import numpy as np
 filename = sys.argv[1]
 
 configs = []
+counts = {}
 throughputs = {
     "Copy": [],
     "Scale": [],
@@ -19,11 +20,20 @@ throughputs = {
 with open(filename, "r") as csvfile:
     reader = csv.DictReader(csvfile)
     for row in reader:
-        configs.append(row['Type'])
-        throughputs['Copy'].append(float(row['Copy']))
-        throughputs['Add'].append(float(row['Add']))
-        throughputs['Scale'].append(float(row['Scale']))
-        throughputs['Triad'].append(float(row['Triad']))
+        if row['Type'] in configs:
+            counts[row['Type']] += 1
+            index = configs.index(row['Type'])
+            throughputs['Copy'][index] += float(row['Copy'])
+            throughputs['Add'][index] += float(row['Add'])
+            throughputs['Scale'][index] += float(row['Scale'])
+            throughputs['Triad'][index] += float(row['Triad'])
+        else:
+            configs.append(row['Type'])
+            counts[row['Type']] = 1
+            throughputs['Copy'].append(float(row['Copy']))
+            throughputs['Add'].append(float(row['Add']))
+            throughputs['Scale'].append(float(row['Scale']))
+            throughputs['Triad'].append(float(row['Triad']))
 
 x = np.arange(len(configs))
 print(x)
@@ -33,7 +43,10 @@ multiplier = 0
 plt.figure(figsize=(10, 6))
 for attr, measurements in throughputs.items():
     offset = width * multiplier
-    plt.bar(x + offset, measurements, width, label=attr)
+    sample_count = counts[configs[multiplier]]
+    print(configs[multiplier] + " " + str(multiplier) + " " + str(sample_count))
+    scaled_measurements = [x / sample_count for x in measurements]
+    plt.bar(x + offset, scaled_measurements, width, label=attr)
     multiplier += 1
 
 plt.legend(loc='upper left')

@@ -21,13 +21,11 @@ bwmmfs = "--bwmmfs" in cmd
 
 experiment_type = ""
 if bwmmfs:
-	experiment_type = "BandwidtMMFS"
 	# Search for the node split
-	weights = re.findall("[0-9]+:[0-9]+", cmd)
-	for w in weights:
-		experiment_type += " " + w
+	weights = re.findall(":[0-9]+", cmd)
+	experiment_type = weights[0][1:] + ":" + weights[1][1:]
 else:
-	experiment_type = "Base Linux"
+	experiment_type = "Linux"
 
 copy_bw = None
 scale_bw = None
@@ -61,5 +59,8 @@ outdata = {
 	"File": filename,
 	"JID": jid,
 }
+
+if copy_bw is None or scale_bw is None or add_bw is None or triad_bw is None:
+    eprint("Invalid output for job ", jid, " Consider restarting that job.")
 
 print(json.dumps(outdata))
